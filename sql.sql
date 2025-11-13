@@ -264,11 +264,6 @@
             SELECT TOP n col
             FROM table;
 
-    AGGREGATE Functions (Count, Sum, Min, Max, Avg)
-        Used to calculate a single value from a group of rows.
-        Often used with GROUP BY, but can also be used without it (applies to the whole table as one group).
-        Ignore NULL values. 
-
     Coding Order
         SELECT TOP n
             col1,
@@ -417,6 +412,196 @@
             TRUNCATE TABLE Customers; -- ERROR if Orders.CustomerID references this
         
         For large tables where you want to delete all rows, TRUNCATE is significantly faster.
+*/
+
+-- * Where Operators
+/*
+    [1] Comparison Operators
+        =, >, <, >=, <=, (<> !=)
+
+    [2] Logical Operators
+        AND, OR, NOT
+
+    [3] Range Operators
+        BETWEEN ... AND ... (inclusive) 
+
+    [4] Membership Operators
+        (IN -> Simplifying the OR) , NOT IN
+
+    [5] Search Operators
+        LIKE (pattern)
+            _ (Exactly one character)
+            % (Zero or more characters)
+
+        To search for a literal (% or _)
+            SQL Server bracket escape:
+                [_] -> literal underscore
+                [%] -> literal percent
+
+            ANSI ESCAPE clause:
+                '\_'  ESCAPE '\'
+                '\%'  ESCAPE '\'
+
+        To search for a range
+            [a-z] -> (a to z) OR (A to Z) -> case insensitive
+            [0-9] -> (0 to 9)
+
+        To exclude characters [^...]
+            [^a-z] -> any char not a to z
+            [^abc] -> any char not a, b, or c 
+*/
+
+-- * Joins
+/*
+    To combine data (columns) from multiple tables
+    [1] INNER JOIN
+        Returns only matching rows from both tables.
+        The order of the tables IS NOT important.
+
+        SELECT *
+        FROM table1
+        INNER JOIN table2
+        ON PK = FK;
+
+
+    [2] LEFT (OUTER) JOIN
+        Returns all rows from the left table, and only the matching rows from the right table.
+        The order of the tables IS important.
+        SQL shows NULLs for non-matching rows.
+
+        SELECT *
+        FROM table1
+        LEFT JOIN table2
+        ON PK = FK;
+
+    [3] RIGHT (OUTER) JOIN
+        The opposite of left join just with the order of the tables switched.
+
+    [4] FULL (OUTER) JOIN
+        Returns all rows from both tables.
+        The order of the tables IS NOT important.
+        SQL shows NULLs for non-matching rows.
+
+        SELECT *
+        FROM table1
+        FULL JOIN table2
+        ON PK = FK;
+
+    [5] Left Anti Join
+        Returns rows from the left table that has NO MATCH in the right table.
+        The order of the tables IS important.
+
+        SELECT *
+        FROM table1
+        LEFT JOIN table2
+        ON PK = FK
+        WHERE FK IS NULL;
+
+    [6] Right Anti Join
+        The opposite of left anti join just with the order of the tables switched.
+
+    [7] Full Anti Join
+        Returns rows from both tables that has NO MATCH.
+        The order of the tables IS NOT important.
+
+        SELECT *
+        FROM table1
+        FULL JOIN table2
+        ON PK = FK
+        WHERE PK IS NULL OR FK IS NULL;
+
+    [8] Cross Join (Cartesian Product)
+        Returns all possible combinations of rows from both tables.
+        The order of the tables IS NOT important.
+
+        SELECT *
+        FROM table1
+        CROSS JOIN table2;
+
+    [9] Self Join
+        Used to join a table to itself for a unary relationship when rows in the same table are related.
+        The engine creates a temporary virtual copy of the same table during execution.
+        The physical table (in DB) is always the child table (Has FK)
+        The virtual table acts as the parent table (Has PK)
+        Must use aliases to differentiate between the two roles.
+
+        SELECT *
+        FROM table1 AS child
+        JOIN table1 AS parent
+        ON parent.PK = child.FK;
+*/
+
+-- * Set Operators
+/*
+    Used to combine rows (data) from two or more queries.
+
+    Rules Of Set Operators
+        1. ORDER BY can only be used once
+        2. Same number of columns
+        3. Matching data types
+        4. Same order of columns
+        5. First query controls aliases
+        6. Mapping correct column.
+
+    [1] UNION
+        Removes duplicate rows (returns only distinct rows).
+
+        SELECT col
+        FROM table1
+        UNION
+        SELECT col
+        FROM table2;
+
+    [2] UNION ALL
+        Does not remove duplicates (includes all rows from both queries).
+        Faster than UNION, since it does not check for duplicates.
+
+        SELECT col
+        FROM table1
+        UNION ALL
+        SELECT col
+        FROM table2;
+
+    [3] EXCEPT (MINUS)
+        Returns the DISTINCT rows from the first query that are NOT in the second query.
+        The order of the tables matters (first -> source, second -> filter).
+        The SQL Engine uses the second query as a check list.
+
+        SELECT col
+        FROM table1
+        EXCEPT
+        SELECT col
+        FROM table2;
+
+    [4] INTERSECT
+        Returns the DISTINCT rows from the first query that are also in the second query.
+
+        SELECT col
+        FROM table1
+        INTERSECT
+        SELECT col
+        FROM table2;
+*/
+
+-- * Built-in Functions
+/*
+    [1] Aggregation Functions
+        COUNT, SUM, AVG, MIN, MAX
+        Used to calculate a single value from a group of rows.
+        Often used with GROUP BY, but can also be used without it (applies to the whole table as one group).
+        Ignore NULL values. 
+
+    [3] Date Functions
+        DATEADD, DATEDIFF, GETDATE, GETUTCDATE
+
+        1. DATEDIFF()
+            returns the number of days between two dates.
+            Parameters
+                1. datepart
+                    The unit of time to measure the difference.
+                    It can be: (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILLISECOND, MICROSECOND, NANOSECOND)
+                2. start_date
+                3. end_date
 */
 
  
