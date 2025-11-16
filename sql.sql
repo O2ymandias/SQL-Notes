@@ -281,7 +281,7 @@
         [4] HAVING
         [5] (SELECT -> DISTINCT "is applied during selection")
         [6] ORDER BY
-        [7] TOP
+        [7] TOP/LIMIT
 */
 
 -- * DDL (Data Definition Language)
@@ -533,7 +533,7 @@
 
 -- * Set Operators
 /*
-    Used to combine rows (data) from two or more queries.
+    Used to combine rows (data) from two or more queries into a single result set.
 
     Rules Of Set Operators
         1. ORDER BY can only be used once
@@ -583,25 +583,86 @@
         FROM table2;
 */
 
+-- * Row-level functions
+/*
+    [1] Single Row
+        Takes one row as an input, and returns one value.
+        Is applied to each row individually.
+        Types:
+            1. String Functions
+                CONCAT
+                UPPER
+                LOWER
+                TRIM
+                REPLACE(value, old, new)
+                LEN
+                LEFT(value, length)
+                RIGHT
+                SUBSTRING(value, start "1-based-indexed", length)
+
+            2. Numeric Functions
+                ROUND(value, decimal_places)
+                ABS
+
+            3. Date & Time Functions
+
+            4. NULL Functions
+
+
+    [2] Multiple Row 
+        Takes multiple rows as an input, and returns one value.
+        Types:
+            1. Aggregate Functions
+            2. Window Functions
+*/
+
+-- * Date & Time Functions
+/*
+    Is part of single row functions
+
+    GETDATE(): datetime2
+        Returns the current date and time.
+
+    DAY(date): int
+    MONTH(date): int
+    YEAR(date): int
+
+    DATEPART(datepart, date): int
+        Extract a specific part of a date as a number (integer).
+        The datepart could be:
+            YEAR,
+            MONTH,
+            DAY,
+            HOUR,
+            MINUTE,
+            SECOND,
+            MILLISECOND
+            MICROSECOND
+            NANOSECOND
+            WEEK,
+            WEEKDAY,
+            QUARTER
+
+    DATENAME(datepart, date): varchar
+        Extract a specific part of a date as a name (varchar).
+
+    DATETRUNC(datepart, date): datetime2
+        Truncate a date to a specific part of the date. the truncated parts is being reset.
+
+    EOMONTH(date): date
+        Returns the date of the last day of the month.
+        To get the first day of the month, use DATETRUNC(month, date)
+
+    DATEDIFF(datepart, start_date, end_date)
+*/
+
 -- * Built-in Functions
 /*
     [1] Aggregation Functions
         COUNT, SUM, AVG, MIN, MAX
         Used to calculate a single value from a group of rows.
         Often used with GROUP BY, but can also be used without it (applies to the whole table as one group).
-        Ignore NULL values. 
-
-    [3] Date Functions
-        DATEADD, DATEDIFF, GETDATE, GETUTCDATE
-
-        1. DATEDIFF()
-            returns the number of days between two dates.
-            Parameters
-                1. datepart
-                    The unit of time to measure the difference.
-                    It can be: (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, MILLISECOND, MICROSECOND, NANOSECOND)
-                2. start_date
-                3. end_date
+        Ignore NULL values.
 */
 
  
