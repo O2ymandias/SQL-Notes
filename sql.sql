@@ -620,6 +620,8 @@
 /*
     Is part of single row functions
 
+    Date & Time Format: yyyy-MM-dd HH:mm:ss
+
     GETDATE(): datetime2
         Returns the current date and time.
 
@@ -653,7 +655,34 @@
         Returns the date of the last day of the month.
         To get the first day of the month, use DATETRUNC(month, date)
 
+    DATEADD(datepart, value(+/-), date): datetime2
+        Add or subtract a specific time interval to/from a date.
+
     DATEDIFF(datepart, start_date, end_date)
+        Finds the difference between two dates.
+*/
+
+-- * Formatting & Casting Functions
+/*
+    1. CAST
+    Casting only (NO formatting)
+    Converts: Any Type -> Any Type
+    Usage example:
+        CAST(123 AS VARCHAR(10))
+
+    2. CONVERT
+    Casting + Date/Time formatting
+    Converts: Any Type → Any Type
+    Can format ONLY Date & DateTime using style codes
+    Usage example:
+        CONVERT(VARCHAR(20), GETDATE(), 34)
+
+    3. FORMAT
+    Full formatting (Date, Time, Number, Money)
+    Converts: Any Type → STRING only
+    Supports culture/locale ('en-US', 'ar-EG')
+    Usage example:
+        FORMAT(GETDATE(), 'dddd, dd MMM yyyy', 'en-US')
 */
 
 -- * Built-in Functions
@@ -664,5 +693,3 @@
         Often used with GROUP BY, but can also be used without it (applies to the whole table as one group).
         Ignore NULL values.
 */
-
- 
