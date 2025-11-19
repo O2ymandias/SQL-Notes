@@ -660,10 +660,21 @@
 
     DATEDIFF(datepart, start_date, end_date)
         Finds the difference between two dates.
+
+    ISDATE(value): bit(0|1)
+        Checks if the date is valid based on the standard format.
+        Accepted Formats:
+            - yyyy-MM-dd HH:mm:ss
+            - yyyy-MM-dd (date only)
+            - yyyy (year only)
+
+        Year boundaries 1753 - 9999
 */
 
 -- * Formatting & Casting Functions
 /*
+    Is part of single row functions
+
     1. CAST
     Casting only (NO formatting)
     Converts: Any Type -> Any Type
@@ -682,7 +693,146 @@
     Converts: Any Type → STRING only
     Supports culture/locale ('en-US', 'ar-EG')
     Usage example:
-        FORMAT(GETDATE(), 'dddd, dd MMM yyyy', 'en-US')
+        FORMAT(GETDATE(), 'dddd, dd MMM yyyy', 'en-US')   
+*/
+
+-- * NULL Functions
+/*
+    Is part of single row functions
+
+    What is NULL?
+        NULL means "unknown".
+        NULL is not equal to anything
+            NULL = NULL -> False
+            NULL != NULL -> False
+            NULL = 0 -> False
+            NULL != 0 -> False
+            NULL = '' -> False
+            NULL != '' -> False
+            NULL = anyValue -> False
+            NULL != anyValue -> False
+
+            NULL + NULL -> NULL
+            NULL + 5 -> NULL
+            NULL + 'abc' -> NULL
+        
+    [1] ISNULL(value, replacement_value)
+        - Replace NULL with a specific value.
+        - Faster
+        - SQL Server specific
+
+        Example:
+            SELECT ISNULL(salary, 'Unknown') AS Salary
+            FROM Employees;
+
+    [2] COALESCE(value1, value2, value3, ...)
+        - Returns the first non-NULL value from a list.
+        - Slower than ISNULL
+        - Universal
+
+        Example:
+            SELECT COALESCE(salary, 0) AS Salary
+            FROM Employees;
+
+    [3] NULLIF(value1, value2)
+        Returns:
+            NULL -> if value1 and value2 are equal.
+            value1 -> if value1 and value2 are not equal.
+
+        Example (Fixing a division by zero error)
+            SELECT
+                OrderId,
+                Sales,
+                Quantity,
+                Sales/NULLIF(Quantity, 0) AS Price
+            FROM Sales.Orders;
+
+    [4] IS NULL / IS NOT NULL
+        Is used for filtering rows with NULLs as (=) operator won't work.
+        Example:
+            SELECT *
+            FROM Employees
+            WHERE first_name IS NULL / IS NOT NULL;
+
+
+    Use Cases:
+        1. Handle the NULLs before doing data aggregations.
+            Most aggregation functions ignore NULLs.
+            Only COUNT(*) counts all rows, including those with NULLs.
+            Example:
+                SELECT AVG(COALESCE(salary, 0))
+                FROM Employees;
+
+        2. Handle the NULLs before doing mathematical operations or concatenations.
+            In SQL, any operation with NULL results in NULL
+            NULL + 5 -> NULL
+            NULL + 'abc' -> NULL
+            Example:
+                SELECT
+                    ISNULL(first_name, '') + ' ' + ISNULL(last_name, '') AS FullName, 
+                    ISNULL(salary, 0) + 5000 AS NewSalary
+                FROM Employees;
+
+        3. Handle the NULLs before joining tables.
+
+            Table a:
+            +------+-------+--------+
+            | year | type  | orders |
+            +------+-------+--------+
+            | 2024 | NULL  | 120    |
+            | 2024 | 'A'   | 200    |
+            +------+-------+--------+
+
+            Table b:
+            +------+-------+--------+
+            | year | type  | sales  |
+            +------+-------+--------+
+            | 2024 | NULL  | 300    |
+            | 2024 | 'A'   | 600    |
+            +------+-------+--------+
+
+            The problem is when joining these two tables on a.year = b.year AND a.type = b.type, the records with NULLs will be lost. This is because NULL = NULL -> False 
+
+            SELECT
+                a.year,
+                a.type,
+                a.orders,
+                b.sales
+            FROM a
+            INNER JOIN b
+            ON a.year = b.year 
+            AND ISNULL(a.type, '') = ISNULL(b.type, '')
+
+            Result:
+            +------+-------+--------+--------+
+            | year | type  | orders | sales  |
+            +------+-------+--------+--------+
+            | 2024 | NULL  | 120    | 300    |
+            | 2024 | 'A'   | 200    | 600    |
+            +------+-------+--------+--------+
+
+        4. Handle the NULLs before sorting.
+            By default, SQL place NULLs at the beginning or end based on the ORDER BY clause.
+                - ORDER BY ASC  : NULLs appear first
+                - ORDER BY DESC : NULLs appear last
+
+            Example (Sort ascending and move NULLs to the bottom)
+                SELECT
+                    CustomerID,
+                    Score
+                FROM Sales.Customers
+                ORDER BY
+                    CASE
+                        WHEN Score IS NULL THEN 1
+                        ELSE 0
+                    END,
+                    Score ASC;
+
+                How it works:
+                    - The CASE statement assigns 0 to non-NULL scores and 1 to NULLs.
+                    - ORDER BY sorts first on (0,1), putting NULLs at the bottom.
+                    - Then it sorts the non-NULL scores in ascending order.
+
 */
 
 -- * Built-in Functions
@@ -692,4 +842,83 @@
         Used to calculate a single value from a group of rows.
         Often used with GROUP BY, but can also be used without it (applies to the whole table as one group).
         Ignore NULL values.
+        COUNT(*) -> Don't ignore NULL values, as it counts the rows.
+
+    [2] Window Functions
+        LAG()
+            Allows you to access data from a previous row in the result set without using a self-join.
+
+            Syntax:
+                LAG(column, offset, default_value) OVER (
+                    [PARTITION BY partition_column]
+                    ORDER BY order_column
+                )
+
+            Parameters:
+                column:
+                    The column value you want to retrieve from the previous row
+
+                offset (optional):
+                    Number of rows back to look (default is 1)
+
+                default_value (optional):
+                    Value to return if there's no previous row (default is NULL)
+
+                PARTITION BY (optional):
+                    Divides data into partitions
+
+                ORDER BY (required):
+                    Determines which row is considered "previous" without it, SQL wouldn't know how to sequence data.         
 */
+
+-- * CASE WHEN 
+/*
+    SQL's way of implementing conditional logic.
+
+    [1] Searched CASE (Conditional Logic)
+        CASE
+            WHEN condition THEN result
+            WHEN condition THEN result
+            ELSE result
+        END
+
+        - More flexible
+        - Each WHEN evaluates a boolean condition
+
+        Example:
+            SELECT 
+                salary,
+                CASE
+                    WHEN salary > 5000 THEN 'High'
+                    WHEN salary BETWEEN 3000 AND 5000 THEN 'Medium'
+                    ELSE 'Low'
+                END AS SalaryLevel
+            FROM Employees;
+
+
+    [2] Simple CASE (Expression Matching)
+        CASE expression
+            WHEN value THEN result
+            WHEN value THEN result
+            ELSE result
+        END
+
+        - Compares a single expression against multiple values
+
+        Example:
+            SELECT 
+                status,
+                CASE status
+                    WHEN 'A' THEN 'Active'
+                    WHEN 'I' THEN 'Inactive'
+                    ELSE 'Unknown'
+                END AS StatusText
+            FROM Users;
+
+    Additional notes:
+        - CASE is an EXPRESSION, not a statement (returns a value)
+        - Evaluation stops at FIRST matching condition (order matters)
+        - ELSE is optional (returns NULL if omitted and no match)
+        - All THEN results must be compatible data types
+*/
+
