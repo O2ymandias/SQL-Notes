@@ -837,12 +837,14 @@
 
 -- * Built-in Functions
 /*
-    [1] Aggregation Functions
-        COUNT, SUM, AVG, MIN, MAX
-        Used to calculate a single value from a group of rows.
-        Often used with GROUP BY, but can also be used without it (applies to the whole table as one group).
-        Ignore NULL values.
-        COUNT(*) -> Don't ignore NULL values, as it counts the rows.
+    [1] Aggregation Functions (COUNT, SUM, AVG, MIN, MAX)
+        - Used to calculate a single value from a group of rows.
+        - Often used with GROUP BY.
+        - If not used with GROUP BY:
+            - is applied to the whole table as one group.
+            - you can't SELECT any other columns.
+        - Ignore NULL values.
+        - ONLY COUNT(*) doesn't ignore NULL values, as it counts the rows.
 
     [2] Window Functions
         LAG()
@@ -871,54 +873,72 @@
                     Determines which row is considered "previous" without it, SQL wouldn't know how to sequence data.         
 */
 
--- * CASE WHEN 
+-- * CASE Statement 
 /*
-    SQL's way of implementing conditional logic.
+    Evaluates a list of conditions and returns a value based on the first condition that matches.
 
-    [1] Searched CASE (Conditional Logic)
-        CASE
-            WHEN condition THEN result
-            WHEN condition THEN result
-            ELSE result
-        END
+    Rules: The data type of the results MUST be the same.
 
-        - More flexible
-        - Each WHEN evaluates a boolean condition
+    Syntax:
 
-        Example:
-            SELECT 
-                salary,
-                CASE
-                    WHEN salary > 5000 THEN 'High'
-                    WHEN salary BETWEEN 3000 AND 5000 THEN 'Medium'
-                    ELSE 'Low'
-                END AS SalaryLevel
-            FROM Employees;
+        Full Form (Searched CASE):
+            CASE
+                WHEN condition1 THEN result1
+                WHEN condition2 THEN result2
+                ...
+                ELSE default_result
+            END
 
+        Short Form (Simple CASE):
+            CASE column
+                WHEN value1 THEN result1
+                WHEN value2 THEN result2
+                ...
+                ELSE default_result
+            END
 
-    [2] Simple CASE (Expression Matching)
-        CASE expression
-            WHEN value THEN result
-            WHEN value THEN result
-            ELSE result
-        END
+        Notes:
+            - If there is no ELSE clause, SQL returns NULL if no condition matches. 
+            - You can only use one column in the short form.
+            - The comparison operator is always "=" in the short form.
 
-        - Compares a single expression against multiple values
+    Use Cases:
 
-        Example:
-            SELECT 
-                status,
-                CASE status
-                    WHEN 'A' THEN 'Active'
-                    WHEN 'I' THEN 'Inactive'
-                    ELSE 'Unknown'
-                END AS StatusText
-            FROM Users;
+        1. Categorizing data
+            Example:
+                SELECT
+                    CASE
+                        WHEN salary > 10000 THEN 'High'
+                        WHEN salary > 5000  THEN 'Medium'
+                        ELSE 'Low'
+                    END AS SalaryCategory
+                FROM Employees;
 
-    Additional notes:
-        - CASE is an EXPRESSION, not a statement (returns a value)
-        - Evaluation stops at FIRST matching condition (order matters)
-        - ELSE is optional (returns NULL if omitted and no match)
-        - All THEN results must be compatible data types
+        2. Mapping data
+            Example:
+                SELECT
+                    CASE Gender
+                        WHEN 'F' THEN 'Female'
+                        WHEN 'M' THEN 'Male'
+                        ELSE 'Unknown'
+                    END AS Gender
+                FROM Customers;
+
+        3. Handling NULLs
+            Example:
+                SELECT
+                    CASE
+                        WHEN salary IS NULL THEN 'Unknown'
+                        ELSE salary
+                    END AS Salary
+                FROM Employees;
+
+        4. Conditional Aggregation
+            Example:
+                SELECT
+                    CustomerID,
+                    SUM(CASE WHEN OrderDate > '2025-01-01' THEN 1 ELSE 0 END) AS RecentOrders,
+                    COUNT(*) AS TotalOrders
+                FROM Customers
+                GROUP BY CustomerID;
 */
-
