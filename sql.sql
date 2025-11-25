@@ -177,9 +177,15 @@
                     col2 DESC;
 
         [4] GROUP BY
-            Collects rows that share the same value in one or more columns.
-            Each unique combination of values in those columns becomes a group.
-            Aggregate functions are then applied to each group.
+            Mechanism:
+            - Groups rows that have the same values in specified columns into summary rows.
+            - Often used with aggregate functions (COUNT, SUM, AVG, MIN, MAX) to perform calculations on each group.
+
+            Rules:
+                - All columns in the SELECT must be either aggregated or part of the GROUP BY.
+
+            Limits:
+                - Can't do aggregations and provide details of individual rows at the same time.
 
             SELECT col
             FROM table
@@ -220,7 +226,6 @@
                 | Cairo   |
                 | Dubai   |
                 +---------+
-
 
             [3] Aggregation
                 SELECT City, SUM(Sales)
@@ -374,44 +379,6 @@
         WHERE condition;
 
         If no WHERE clause is specified, SQL deletes all rows.
-*/
-
--- * Key Differences: DELETE vs TRUNCATE
-/*
-    DELETE:
-        1. Can use WHERE clause
-        2. Fires triggers
-        3. Doesn't reset IDENTITY counter
-        4. Logs each row deletion (can rollback)
-        5. Slower for large tables
-        6. Can delete rows even if table has foreign key references to it
-        7. Requires DELETE permission
-        8. DELETE is a DML
-    
-    TRUNCATE:
-        1. Removes ALL rows (no WHERE clause)
-        2. Does NOT fire triggers
-        3. Resets IDENTITY counter to seed value
-        4. Minimal logging (usually can't rollback)
-        5. Faster for large tables
-        6 Can't truncate if table has foreign key references to it
-        7. Requires ALTER TABLE permission
-        8. TRUNCATE is a DDL
-
-    Examples:
-        Delete specific rows
-            DELETE FROM Orders WHERE OrderDate < '2020-01-01';
-        
-        Delete all rows (logged, slow)
-            DELETE FROM TempData;
-        
-        Remove all rows (fast, resets identity)
-            TRUNCATE TABLE TempData;
-        
-        TRUNCATE fails if foreign keys reference this table
-            TRUNCATE TABLE Customers; -- ERROR if Orders.CustomerID references this
-        
-        For large tables where you want to delete all rows, TRUNCATE is significantly faster.
 */
 
 -- * Where Operators
@@ -832,19 +799,10 @@
                     - The CASE statement assigns 0 to non-NULL scores and 1 to NULLs.
                     - ORDER BY sorts first on (0,1), putting NULLs at the bottom.
                     - Then it sorts the non-NULL scores in ascending order.
-
 */
 
 -- * Built-in Functions
 /*
-    [1] Aggregation Functions (COUNT, SUM, AVG, MIN, MAX)
-        - Used to calculate a single value from a group of rows.
-        - Often used with GROUP BY.
-        - If not used with GROUP BY:
-            - is applied to the whole table as one group.
-            - you can't SELECT any other columns.
-        - Ignore NULL values.
-        - ONLY COUNT(*) doesn't ignore NULL values, as it counts the rows.
 
     [2] Window Functions
         LAG()
@@ -942,3 +900,177 @@
                 FROM Customers
                 GROUP BY CustomerID;
 */
+
+-- * Aggregation Functions (COUNT, SUM, AVG, MIN, MAX) 
+/*
+    Part of the "single-row functions" category.
+
+    Used to calculate a single value from a group of rows.
+
+    Often used with GROUP BY.
+
+    If not used with GROUP BY:
+        - Is applied to the whole table as one group.
+        - Can't SELECT any other columns.
+    
+    Ignore NULL values.
+
+    ONLY COUNT(*) doesn't ignore NULL values, as it counts the rows.
+
+    COUNT(*) == COUNT(1)
+*/
+
+-- * Window Functions
+/*
+    Part of the "multiple-row functions" category.
+
+    A Window Function performs calculations across a set of rows "window" that are related to the current row without losing the higher level of detail.
+
+    Unlike aggregate functions used with GROUP BY, which collapse multiple rows into a single summary row (Only the grouped keys and aggregated values are available), window functions do not collapse rows instead, they keep the original rows and add the calculated value next to each row.
+
+    Syntax:
+        window_function OVER (
+            PARTITION BY 
+            ORDER BY
+            ROWS/RANGE
+        )
+
+    Types of Window Functions:
+        - Aggregate functions are used as window functions (SUM, AVG, COUNT, MIN, MAX)
+        - Ranking functions (ROW_NUMBER, RANK, DENSE_RANK, NTILE)
+        - Value functions (LAG, LEAD, FIRST_VALUE, LAST_VALUE)
+
+    OVER clause:
+        - Tells SQL to treat the function as a window function.
+        - It defines the window (set of rows) for the calculation via:
+
+            1. PARTITION BY (optional):
+                Divides dataset into partitions/groups/sets/windows to which the window function is applied independently.
+                If not specified, the entire dataset is treated as a single partition.
+
+            2. ORDER BY (optional): Defines the order of rows within each partition.
+
+            3. Frame (optional): Defines a subset of rows within each partition that is relevant to the current row for the window function calculation.
+
+                Frame Types:
+                    - ROWS: Based on physical row positions.
+                    - RANGE: Based on logical values.
+
+                Frame Boundaries:
+                    - UNBOUNDED PRECEDING: From the start of the partition.
+                    - n PRECEDING: n rows before the current row.
+                    - CURRENT ROW: The current row.
+                    - n FOLLOWING: n rows after the current row.
+                    - UNBOUNDED FOLLOWING: To the end of the partition.
+
+                Rules:
+                    1. Frame clause can ONLY be used together with ORDER BY clause.
+                    2. Lower boundary must come before upper boundary.
+
+                Example:
+                    SELECT 
+                        OrderID,
+                        OrderDate,
+                        OrderStatus,
+                        Sales,
+                        SUM(Sales) OVER(
+                            PARTITION BY OrderStatus
+                            ORDER BY OrderDate
+                            ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING
+                        )
+                    FROM Sales.Orders
+
+                Compact Frame:
+                    For only PRECEDING, The CURRENT ROW can be omitted.
+                        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW -> ROWS 2 PRECEDING
+
+                Default Frame:
+                    If ORDER BY is specified without a frame, the default frame is:
+                        RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+
+                Running(Moving) Total:
+                    Summarizes all values from the first row of the window up to the current row.
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW -- Default if ORDER BY is used
+                    Example:
+                        SELECT 
+                            OrderID,
+                            OrderDate,
+                            Sales,
+                            SUM(Sales) OVER(
+                                ORDER BY OrderDate
+                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                            ) AS RunningTotal
+                        FROM Sales.Orders
+
+                Rolling Total:
+                    Summarizes a fixed number of consecutive rows calculated within a moving window.
+                    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                    Example:
+                        SELECT 
+                            OrderID,
+                            OrderDate,
+                            Sales,
+                            SUM(Sales) OVER(
+                                ORDER BY OrderDate
+                                ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                            ) AS RollingTotal
+                        FROM Sales.Orders
+
+
+    Rules of using window functions:
+        [1] Window functions can be used only in the SELECT and ORDER BY clauses.
+            You CANNOT use window functions in:
+            WHERE, GROUP BY, HAVING, JOIN conditions
+            Because they are evaluated in the SELECT clause
+
+
+        [2] Nested window functions are not allowed.
+            SUM( AVG(Sales) OVER(PARTITION BY CustomerID) ) OVER() -> NOT ALLOWED
+
+
+        [4] Window functions can be used with GROUP BY is the same query ONLY if they don't reference non-aggregated values/non-grouped columns.
+
+            When you use GROUP BY, the only available columns in the SELECT clause are:
+                - Grouped columns
+                - Aggregated values
+            All other columns are lost.
+            So window function must work only on columns that still exist after grouping.
+
+            Example:
+                SELECT
+                    CustomerID,
+                    SUM(Sales) AS [Total Sales],
+                    RANK() OVER(ORDER BY SUM(Sales) DESC) AS RankedByTotalSales,
+                    RANK() OVER(ORDER BY CustomerID) AS RankedByCustomerID
+                FROM Sales.Orders
+                GROUP BY CustomerID;
+
+                Why valid?
+                    - The window function uses only:
+                        1. Aggregated data (SUM(Sales)), not raw columns
+                        2. Grouped columns (CustomerID)
+
+
+
+    Rank Functions:
+        [1] RANK()
+            Assigns a rank to each row within a partition of a result set.
+            Ties receive the same rank, and the next rank is skipped.
+            ORDER BY is required at the OVER clause.
+            Example:
+                SELECT
+                    RANK() OVER (ORDER BY Score DESC) AS Rank
+                FROM Students;
+
+        [2] ROW_NUMBER()
+            Assigns a unique sequential integer to rows within a partition of a result set, starting at 1 for the first row in each partition.
+            No ties, each row gets a distinct number.
+
+        [3] DENSE_RANK()
+            Similar to RANK(), but without gaps in ranking values when there are ties.
+
+        [4] NTILE(n)
+            Divides the ordered rows in a partition into n approximately equal groups (tiles) and assigns a tile number to each row.
+*/
+
+
