@@ -801,36 +801,6 @@
                     - Then it sorts the non-NULL scores in ascending order.
 */
 
--- * Built-in Functions
-/*
-
-    [2] Window Functions
-        LAG()
-            Allows you to access data from a previous row in the result set without using a self-join.
-
-            Syntax:
-                LAG(column, offset, default_value) OVER (
-                    [PARTITION BY partition_column]
-                    ORDER BY order_column
-                )
-
-            Parameters:
-                column:
-                    The column value you want to retrieve from the previous row
-
-                offset (optional):
-                    Number of rows back to look (default is 1)
-
-                default_value (optional):
-                    Value to return if there's no previous row (default is NULL)
-
-                PARTITION BY (optional):
-                    Divides data into partitions
-
-                ORDER BY (required):
-                    Determines which row is considered "previous" without it, SQL wouldn't know how to sequence data.         
-*/
-
 -- * CASE Statement 
 /*
     Evaluates a list of conditions and returns a value based on the first condition that matches.
@@ -901,25 +871,6 @@
                 GROUP BY CustomerID;
 */
 
--- * Aggregation Functions (COUNT, SUM, AVG, MIN, MAX) 
-/*
-    Part of the "single-row functions" category.
-
-    Used to calculate a single value from a group of rows.
-
-    Often used with GROUP BY.
-
-    If not used with GROUP BY:
-        - Is applied to the whole table as one group.
-        - Can't SELECT any other columns.
-    
-    Ignore NULL values.
-
-    ONLY COUNT(*) doesn't ignore NULL values, as it counts the rows.
-
-    COUNT(*) == COUNT(1)
-*/
-
 -- * Window Functions
 /*
     Part of the "multiple-row functions" category.
@@ -986,7 +937,7 @@
 
                 Default Frame:
                     If ORDER BY is specified without a frame, the default frame is:
-                        RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
 
                 Running(Moving) Total:
                     Summarizes all values from the first row of the window up to the current row.
@@ -1049,28 +1000,375 @@
                     - The window function uses only:
                         1. Aggregated data (SUM(Sales)), not raw columns
                         2. Grouped columns (CustomerID)
-
-
-
-    Rank Functions:
-        [1] RANK()
-            Assigns a rank to each row within a partition of a result set.
-            Ties receive the same rank, and the next rank is skipped.
-            ORDER BY is required at the OVER clause.
-            Example:
-                SELECT
-                    RANK() OVER (ORDER BY Score DESC) AS Rank
-                FROM Students;
-
-        [2] ROW_NUMBER()
-            Assigns a unique sequential integer to rows within a partition of a result set, starting at 1 for the first row in each partition.
-            No ties, each row gets a distinct number.
-
-        [3] DENSE_RANK()
-            Similar to RANK(), but without gaps in ranking values when there are ties.
-
-        [4] NTILE(n)
-            Divides the ordered rows in a partition into n approximately equal groups (tiles) and assigns a tile number to each row.
 */
 
+-- * Aggregation Functions (COUNT, SUM, AVG, MIN, MAX) 
+/*
+    Part of the "single-row functions" category.
 
+    Used to calculate a single value from a group of rows.
+
+    Often used with GROUP BY.
+
+    If not used with GROUP BY:
+        - Is applied to the whole table as one group.
+        - Can't SELECT any other columns.
+    
+    Ignore NULL values.
+
+    ONLY COUNT(*) doesn't ignore NULL values, as it counts the rows.
+
+    COUNT(*) == COUNT(1)
+*/
+
+-- * Ranking Functions
+/*
+    Two types:
+        1. Integer-Based Ranking
+            - ROW_NUMBER()
+            - RANK()
+            - DENSE_RANK()
+            - NTILE(n)
+
+        2. Percentage-Based Ranking
+            - CUME_DIST()
+            - PERCENT_RANK()
+
+    Rules:
+        PARTITION BY Clause is optional.
+        ORDER BY Clause is required.
+        Frame Clause is NOT allowed.
+
+
+    [1] ROW_NUMBER()
+        Assigns a UNIQUE rank to each row (No Gaps).
+        It does NOT handle ties.
+
+    [2] RANK()
+        Assigns a rank to each row.
+        Ties receive the same rank, and the next rank is skipped.
+
+    [3] DENSE_RANK()
+        Assigns a rank to each row.
+        Ties receive the same rank, and the next rank is NOT skipped.
+
+    [4] NTILE(n)
+        Divides the rows into "n" approximately "around" equal groups (tiles/buckets).
+        Each row is assigned a tile number from 1 to n.
+        Bucket size = Total Rows / n(The number of buckets)
+        Larger buckets come first.
+
+
+    [1] CUME_DIST() - Cumulative Distribution
+        
+        Purpose:
+            Calculates the cumulative distribution of a value within an ordered dataset.
+            Shows what fraction of rows have values less than or equal to the current row.
+        
+        Returns: 
+            A decimal value in the range (0, 1]
+            (Always greater than 0, up to and including 1)
+        
+        Formula:
+            CUME_DIST = (Number of rows ≤ current value) / (Total rows in partition)
+            
+            Or equivalently:
+            CUME_DIST = (Rank of last row with current value) / (Total rows)
+        
+        Tie Handling:
+            - Rows with identical ORDER BY values receive the SAME CUME_DIST
+            - Uses the LAST position among tied rows for calculation
+            - Example: If 3 rows tie at positions 5-7, all get CUME_DIST based on position 7
+        
+        Example:
+            Salary: 30K, 40K, 40K, 50K, 60K
+            CUME_DIST: 0.2, 0.6, 0.6, 0.8, 1.0
+            (The two 40K salaries both use position 3 of 5 = 0.6)
+
+
+    [2] PERCENT_RANK() - Percentile Rank
+        
+        Purpose:
+            Calculates the relative rank of a row as a percentage within an ordered dataset.
+            Shows how the current row compares to others (0% = lowest, 100% = highest).
+        
+        Returns: 
+            A decimal value in the range [0, 1]
+            (From 0 to 1 inclusive)
+        
+        Formula:
+            PERCENT_RANK = (RANK - 1) / (Total rows - 1)
+            Where RANK is the row's position in the ordered set
+        
+        Tie Handling:
+            - Rows with identical ORDER BY values receive the SAME PERCENT_RANK
+            - Uses the FIRST position among tied rows for calculation
+            - Example: If 3 rows tie at positions 5-7, all get PERCENT_RANK based on position 5
+        
+        Special Case:
+            - If there's only 1 row, PERCENT_RANK = 0 (avoids division by zero)
+        
+        Example:
+            Salary: 30K, 40K, 40K, 50K, 60K
+            RANK: 1, 2, 2, 4, 5
+            PERCENT_RANK: 0.0, 0.25, 0.25, 0.75, 1.0
+            (The two 40K salaries both use rank 2: (2-1)/(5-1) = 0.25)
+
+
+    Key Differences Between CUME_DIST and PERCENT_RANK
+        CUME_DIST:
+            - Uses LAST position of tied rows
+            - Never returns 0 (minimum is 1/n where n = total rows)
+            - Answers: "What % of rows are ≤ this value?"
+
+        PERCENT_RANK:
+            - Uses FIRST position of tied rows  
+            - First row always returns 0
+            - Answers: "Where does this row rank relative to others?"
+
+        Both:
+            - Require ORDER BY clause
+            - Can use PARTITION BY for groups
+            - Tied rows get identical values
+*/
+
+-- * Value Functions
+/*
+    Part of the "multiple-row functions" category.
+    Used to access data from other rows in the result set without using a self-join.
+
+    [1] LEAD
+        Allows accessing data from the next row within a window.
+
+        Syntax:
+            LEAD(
+                Column Name        -> The column from which to retrieve the value.
+                , Offset           -> optional, default = 1 (how many rows ahead to look)
+                , Default Value    -> optional, default = NULL (value to return if the lead row does not exist)
+            )
+            OVER (
+                PARTITION BY  -> optional
+                ORDER BY      -> required
+                FRAME         -> NOT ALLOWED
+            )
+
+    [2] LAG
+        Allows accessing data from the previous row within a window.
+
+    [3] FIRST_VALUE
+        Returns the first **non-null** value within a window.
+
+    [4] LAST_VALUE
+        Returns the last **non-null** value within a window.
+
+        Important:
+            The frame clause is critical to get the correct result.
+
+        Default Frame:
+            UNBOUNDED PRECEDING
+            AND CURRENT ROW
+            -> With this default, LAST_VALUE returns the value of the **current row**, not the actual last row in the partition.
+
+        To Get the Actual Last Value in the Partition:
+            Specify the frame explicitly:
+                ROWS BETWEEN CURRENT ROW
+                AND UNBOUNDED FOLLOWING
+*/
+
+-- * Database Structure Overview
+/*
+    [1] Database Engine
+        The core service responsible for storing, retrieving, and processing data.
+
+    [2] Database Storage
+
+        [A] Disk Storage
+            - Long-term storage (persistent).
+            - Capacity: Very large.
+            - Speed: Slower read/write operations compared to memory.
+
+            Types of Disk Storage:
+                (1) User Data Storage
+                    - The MAIN content of the database.
+                    - Stores the actual data created by users and applications.
+
+                (2) System Catalog Storage
+                    - Internal storage for database metadata (data about data).
+                    - Contains information about tables, columns, indexes, constraints, etc.
+                    - You can query metadata using INFORMATION_SCHEMA and system views.
+
+                (3) Temp Storage
+                    - Used for temporary operations (sorting, hashing, intermediate results).
+                    - Data is deleted after the operation completes.
+                    - Backed by physical disk (TempDB in SQL Server).
+
+        [B] Cache Storage
+            - Short-term, in-memory storage.
+            - Capacity: Limited.
+            - Speed: Extremely fast (RAM).
+            - Purpose: Speeds up frequently accessed data and reduces disk operations.
+*/
+
+-- * Subqueries
+/*
+    Definition:
+        A subquery is a query nested inside another query.
+
+    Result Types:
+        [1] Scalar Subquery
+            - Returns a SINGLE value (one row, one column).
+
+        [2] Row Subquery
+            - Returns MULTIPLE rows but ONLY ONE column.
+            - Often used with IN, ANY, ALL, EXISTS.
+
+        [3] Table Subquery
+            - Returns multiple rows and multiple columns.
+            - Behaves like a regular table.
+
+    Types of Subqueries:
+
+    [A] Non-Correlated Subquery
+        - A subquery that can run INDEPENDENTLY of the main query.
+
+        NOTES:
+            1. The subquery is executed FIRST.
+            2. The subquery result is passed to the main query.
+
+    [B] Correlated Subquery
+        - A subquery that RELIES on values from the main query.
+
+        Execution:
+            1. SQL executes the MAIN QUERY first.
+            2. SQL processes the main query result ROW BY ROW.
+            3. The main query passes the CURRENT ROW values to the subquery.
+            4. SQL executes the subquery using those values.
+            5. SQL checks if the subquery returned a result.
+            6. If so, SQL includes the CURRENT ROW in the final output.
+            7. SQL repeats this process for EVERY row.
+            8. SQL returns the FINAL RESULT.
+
+        NOTES:
+            1. The MAIN QUERY runs first.
+            2. The SUBQUERY runs ONCE PER ROW of the main query.
+
+        Example:
+            SELECT
+                *,
+                (SELECT COUNT(*)
+                FROM Sales.Orders AS o
+                WHERE c.CustomerID = o.CustomerID
+                ) AS TotalOrders
+            FROM Sales.Customers AS c
+            In this example, the subquery is executed ONCE FOR EACH ROW of the main query.
+
+                  
+
+    Where You Can Use Subqueries:
+
+        [1] FROM Clause (Derived Table / Inline View)
+            - Used as a temporary table for the main query.
+                Example:
+                    SELECT *
+                    FROM (
+                        SELECT
+                            *,
+                            AVG(Price) OVER() AS AvgPrice
+                        FROM Sales.Products
+                    ) AS temp
+                    WHERE Price > AvgPrice;
+
+        [2] SELECT Clause (Scalar subqueries only)
+                Example:
+                    SELECT
+                        *,
+                        (SELECT AVG(Price) FROM Sales.Products) AS AvgPrice
+                    FROM Sales.Products;
+
+                Notes:
+                    - MUST return a single value.
+                    - Same effect as:
+                        SELECT
+                            *,
+                            AVG(Price) OVER() AS AvgPrice
+                        FROM Sales.Products;
+
+        [3] JOIN Clause
+            - Used to prepare data before joining it with another table.
+            Example:
+                SELECT *
+                FROM Sales.Customers AS c
+                LEFT JOIN (
+                    SELECT
+                        CustomerID,
+                        COUNT(*) AS TotalOrders
+                    FROM Sales.Orders
+                    GROUP BY CustomerID
+                ) AS temp
+                ON c.CustomerID = temp.CustomerID
+
+
+        [4] WHERE Clause
+            [A] With Comparison Operators
+                Subquery MUST be scalar.
+                Example: 
+                    SELECT * FROM Sales.Products
+                    WHERE Price > 
+                        (SELECT AVG(Price) FROM Sales.Products) -- Scalar Subquery
+
+                
+            [B] With Logical Operators (IN, ANY, ALL, EXISTS)
+                (1) IN
+                    SELECT *
+                    FROM Sales.Orders
+                    WHERE CustomerID IN (
+                        SELECT CustomerID
+                        FROM Sales.Customers
+                        WHERE Country = 'Germany'
+                    );
+
+                (2) Comparison Operator + ANY
+                    Checks if a value matches ANY of the values in the subquery.
+                    SELECT *
+                    FROM Sales.Employees
+                    WHERE Gender = 'F'
+                    AND Salary > Any (
+                        SELECT Salary
+                        FROM Sales.Employees
+                        WHERE Gender = 'M'
+                    )
+
+                (3) Comparison Operator + ALL
+                    Checks if a value matches ALL of the values in the subquery.
+                    SELECT *
+                    FROM Sales.Employees
+                    WHERE Gender = 'F'
+                    AND Salary > All (
+                        SELECT Salary
+                        FROM Sales.Employees
+                        WHERE Gender = 'M'
+                    )
+
+                (4) EXISTS (Correlated Subquery)
+                    - Checks whether the subquery returns ANY rows.
+                    - EXISTS returns TRUE as soon as the subquery returns at least one row.
+
+                    Example:
+                        SELECT *
+                        FROM Sales.Orders AS o
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM Sales.Customers AS c
+                            WHERE c.Country = 'Germany'
+                            AND c.CustomerID = o.CustomerID
+                        )
+
+                    Explanation:
+                        - SQL processes the Orders table row by row.
+                        - For each order, SQL runs the subquery to check whether there exists
+                        a customer from Germany with the SAME CustomerID.
+                        - The condition c.CustomerID = o.CustomerID makes it a CORRELATED
+                        subquery because the subquery depends on values from the main query.
+                        - If the subquery returns at least one row, EXISTS = TRUE and the order
+                        is included in the final output.
+*/
