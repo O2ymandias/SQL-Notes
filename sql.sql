@@ -1085,7 +1085,6 @@
             CUME_DIST: 0.2, 0.6, 0.6, 0.8, 1.0
             (The two 40K salaries both use position 3 of 5 = 0.6)
 
-
     [2] PERCENT_RANK() - Percentile Rank
         
         Purpose:
@@ -1372,3 +1371,338 @@
                         - If the subquery returns at least one row, EXISTS = TRUE and the order
                         is included in the final output.
 */
+
+-- * CTE (Common Table Expressions)
+/*
+    Temporary, named result set (virtual table) that can be used multiple times in a query to simplify and organize a complex query.
+
+    Accessing the data from a CTE is usually faster than repeatedly scanning physical tables, because the result is calculated once and reused (logical optimization).    
+
+    Syntax:
+        WITH CTE_name AS (
+            SELECT
+                col1,
+                col2
+            FROM table
+            WHERE condition
+        )
+        SELECT
+            col1,
+            col2
+        FROM CTE_name
+        WHERE condition
+
+    CTE RULES:
+        1. Can't use ORDER BY directly inside a CTE unless accompanied by TOP or used inside a window function.
+
+    Types of CTEs:
+        [1] Non-Recursive CTE
+            Is executed only ONCE.
+
+            [A] Standalone CTE
+                Runs independently as it's self-contained and doesn't rely on other CTEs or queries.
+
+                Example (Single Standalone CTE)
+                    WITH CTE_totalSales AS (
+                        SELECT 
+                            CustomerID,
+                            SUM(Sales) AS TotalSales
+                        FROM Sales.Orders
+                        GROUP BY CustomerID
+                    )
+                    SELECT
+                        c.CustomerID,
+                        c.FirstName,
+                        c.LastName,
+                        ts.TotalSales
+                    FROM Sales.Customers AS c
+                    LEFT JOIN CTE_totalSales AS ts
+                        ON ts.CustomerID = c.CustomerID
+
+                Example (Multiple Standalone CTEs)
+                    WITH CTE_totalSales AS (
+                        SELECT 
+                            CustomerID,
+                            SUM(Sales) AS TotalSales
+                        FROM Sales.Orders
+                        GROUP BY CustomerID
+                    ),
+                    CTE_lastOrderDate AS (
+                        SELECT
+                            CustomerID,
+                            MAX(OrderDate) AS lastOrderDate
+                        FROM Sales.Orders
+                        GROUP BY CustomerID
+                    )
+                    SELECT
+                        c.CustomerID,
+                        c.FirstName,
+                        c.LastName,
+                        ts.TotalSales,
+                        lod.lastOrderDate
+                    FROM Sales.Customers AS c
+                    LEFT JOIN CTE_totalSales AS ts
+                        ON ts.CustomerID = c.CustomerID
+                    LEFT JOIN CTE_lastOrderDate AS lod
+                        ON lod.CustomerID = c.CustomerID
+
+            [B] Nested CTE
+                A nested CTE uses the result of another CTE, so it CAN'T run independently.
+
+                Example
+                    WITH CTE_TotalSales AS (
+                        SELECT
+                            CustomerID,
+                            SUM(Sales) AS TotalSales
+                        FROM Sales.Orders -- Standalone CTE, it doesn't depend on any other CTE
+                        GROUP BY CustomerID
+                    ),
+                    CTE_LastOrderDate AS (
+                        SELECT
+                            CustomerID,
+                            MIN(OrderDate) AS LastOrderDate
+                        FROM Sales.Orders -- Standalone CTE, it doesn't depend on any other CTE
+                        GROUP BY CustomerID
+                    ),
+                    CTE_CustomerRank AS
+                    (
+                        SELECT
+                            *,
+                            RANK() OVER(ORDER BY TotalSales DESC) AS CustomerRank
+                        FROM CTE_TotalSales -- Nested CTE, it depends on CTE_TotalSales
+                    )
+                    SELECT
+                        c.CustomerID,
+                        CONCAT(c.FirstName, ' ', c.LastName) AS FullName,
+                        ts.TotalSales,
+                        lod.LastOrderDate,
+                        rts.CustomerRank
+                    FROM Sales.Customers AS c
+                    LEFT JOIN CTE_TotalSales AS ts
+                        ON c.CustomerID = ts.CustomerID
+                    LEFT JOIN CTE_LastOrderDate AS lod
+                        ON c.CustomerID = lod.CustomerID
+                    LEFT JOIN CTE_CustomerRank AS rts
+                        ON c.CustomerID = rts.CustomerID
+
+        [2] Recursive CTE
+            A self-referencing query that repeatedly processes data
+            until a specified condition is met.
+
+            Syntax:
+            WITH CTE_Name AS (
+                -- Anchor Member
+                SELECT
+                    col1,
+                    col2
+                FROM table
+                WHERE condition
+
+                UNION ALL
+
+                -- Recursive Member
+                SELECT
+                    t.col1,
+                    t.col2
+                FROM table t
+                INNER JOIN CTE_Name c -- Self-reference
+                    ON join_condition -- Break condition
+                WHERE break_condition -- Break condition
+            )
+            -- Main Query
+            SELECT
+                col1,
+                col2
+            FROM CTE_Name
+            OPTION (MAXRECURSION 10); -- default = 100, max = 32767 
+
+            Execution Flow:
+            [1] SQL Server executes the anchor member once
+                and stores the initial result set.
+
+            [2] SQL Server executes the recursive member using
+                the result from the previous iteration.
+
+                - If the break condition is NOT met, recursion continues.
+                - If the break condition IS met, recursion stops.
+
+            Example (1): Number Series
+            WITH CTE_Series AS (
+                -- Anchor Member
+                SELECT 1 AS Number
+
+                UNION ALL
+
+                --Recursive Member
+                SELECT Number + 1
+                FROM CTE_Series
+                WHERE Number < 20
+            )
+            SELECT *
+            FROM CTE_Series;
+
+            Example (2): Employee Hierarchy
+            WITH CTE_Hierarchy AS (
+                -- Anchor Member
+                SELECT
+                    EmployeeID,
+                    CONCAT(FirstName, ' ', LastName) AS Name,
+                    ManagerID,
+                    1 AS Level
+                FROM Sales.Employees
+                WHERE ManagerID IS NULL
+
+                UNION ALL
+
+                -- Recursive Member
+                SELECT
+                    e.EmployeeID,
+                    CONCAT(e.FirstName, ' ', e.LastName) AS Name,
+                    e.ManagerID,
+                    h.Level + 1
+                FROM Sales.Employees e
+                INNER JOIN CTE_Hierarchy h
+                    ON e.ManagerID = h.EmployeeID
+            )
+            SELECT *
+            FROM CTE_Hierarchy;
+*/
+
+--* Example: Recursive CTE – Employee Hierarchy (Step by Step)
+/*
+    Example Data (Sales.Employees):
+
+    | EmployeeID | FirstName | LastName | ManagerID |
+    | ---------- | --------- | -------- | --------- |
+    | 1          | John      | Smith    | NULL      |
+    | 2          | Sara      | Lee      | 1         |
+    | 3          | Omar      | Ali      | 1         |
+    | 4          | Lina      | Noor     | 2         |
+    | 5          | Adam      | Saleh    | 2         |
+
+
+    Visual Hierarchy:
+    John (Level 1)
+    ├─ Sara (Level 2)
+    │  ├─ Lina (Level 3)
+    │  └─ Adam (Level 3)
+    └─ Omar (Level 2)
+
+
+    SQL:
+        WITH CTE_Hierarchy AS (
+            -- Anchor Member
+            SELECT
+                EmployeeID,
+                CONCAT(FirstName, ' ', LastName) AS Name,
+                ManagerID,
+                1 AS Level
+            FROM Sales.Employees
+            WHERE ManagerID IS NULL
+
+            UNION ALL
+
+            -- Recursive Member
+            SELECT
+                e.EmployeeID,
+                CONCAT(e.FirstName, ' ', e.LastName) AS Name,
+                e.ManagerID,
+                h.Level + 1
+            FROM Sales.Employees e
+            INNER JOIN CTE_Hierarchy h
+                ON e.ManagerID = h.EmployeeID
+        )
+        SELECT *
+        FROM CTE_Hierarchy;
+
+    Step 1: Anchor Query (Level 1)
+        SELECT
+            EmployeeID,
+            CONCAT(FirstName, ' ', LastName) AS Name,
+            ManagerID,
+            1 AS Level
+        FROM Sales.Employees
+        WHERE ManagerID IS NULL
+
+        -> Finds top-level employees (employees with no manager)
+        -> Sets their hierarchy Level to 1
+
+        Result After Anchor Member:
+        | EmployeeID | Name       | ManagerID | Level |
+        | ---------- | ---------- | --------- | ----- |
+        | 1          | John Smith | NULL      | 1     |
+
+
+    Step 2: First Recursive Iteration (Level 2)
+        SELECT
+            e.EmployeeID,
+            CONCAT(e.FirstName, ' ', e.LastName) AS Name,
+            e.ManagerID,
+            h.Level + 1
+        FROM Sales.Employees e
+        INNER JOIN CTE_Hierarchy h
+            ON e.ManagerID = h.EmployeeID
+
+        -> Finds employees whose ManagerID exists in the CTE
+        -> Sets their hierarchy Level to (parent Level + 1)
+
+        Employees managed by John (EmployeeID = 1):
+        | EmployeeID | Name     | ManagerID | Level |
+        | ---------- | -------- | --------- | ----- |
+        | 2          | Sara Lee | 1         | 2     |
+        | 3          | Omar Ali | 1         | 2     |
+
+        Result After First Recursive Iteration:
+        | EmployeeID | Name       | ManagerID | Level |
+        | ---------- | ---------- | --------- | ----- |
+        | 1          | John Smith | NULL      | 1     |
+        | 2          | Sara Lee   | 1         | 2     |
+        | 3          | Omar Ali   | 1         | 2     |
+
+
+    Step 3: Second Recursive Iteration (Level 3)
+        -> The CTE now contains:
+           John (1), Sara (2), Omar (3)
+
+        -> Only the newly added rows from the previous iteration
+           (Sara and Omar) are used to find more employees.
+
+        Employees managed by Sara (EmployeeID = 2):
+        | EmployeeID | Name       | ManagerID | Level |
+        | ---------- | ---------- | --------- | ----- |
+        | 4          | Lina Noor  | 2         | 3     |
+        | 5          | Adam Saleh | 2         | 3     |
+
+        Employees managed by Omar (EmployeeID = 3):
+        | EmployeeID | Name | ManagerID | Level |
+        | ---------- | ---- | --------- | ----- |
+        | NO ROWS    |      |           |       |
+
+        CTE now contains:
+        | EmployeeID | Name       | ManagerID | Level |
+        | ---------- | ---------- | --------- | ----- |
+        | 1          | John Smith | NULL      | 1     |
+        | 2          | Sara Lee   | 1         | 2     |
+        | 3          | Omar Ali   | 1         | 2     |
+        | 4          | Lina Noor  | 2         | 3     |
+        | 5          | Adam Saleh | 2         | 3     |
+
+
+    --------------------------------------------------------------
+    Step 4: Third Recursive Iteration (Level 4)
+    --------------------------------------------------------------
+        -> Newly added rows: Lina (4) and Adam (5)
+        -> SQL attempts to find employees managed by them
+
+        Employees managed by Lina (EmployeeID = 4):
+        | NO ROWS |
+
+        Employees managed by Adam (EmployeeID = 5):
+        | NO ROWS |
+
+        -> No new rows are produced
+
+        SQL Server stops recursion automatically and returns the final result set.
+*/
+
+
