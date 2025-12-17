@@ -1178,6 +1178,7 @@
 /*
     [1] Database Engine
         The core service responsible for storing, retrieving, and processing data.
+        It handles: Query execution, Transactions, Concurrency control, Security
 
     [2] Database Storage
 
@@ -1190,6 +1191,7 @@
                 (1) User Data Storage
                     - The MAIN content of the database.
                     - Stores the actual data created by users and applications.
+                    - Includes tables and indexes.
 
                 (2) System Catalog Storage
                     - Internal storage for database metadata (data about data).
@@ -1206,6 +1208,41 @@
             - Capacity: Limited.
             - Speed: Extremely fast (RAM).
             - Purpose: Speeds up frequently accessed data and reduces disk operations.
+
+    Logical Structure:
+        Each SQL Server instance has multiple databases
+        Each database has multiple schemas
+        Each schema has multiple objects (tables, views, stored procedures, etc.).
+
+        SQL Server Instance
+        │
+        ├── Database 1
+        │   │
+        │   ├── Schema: dbo
+        │   │   ├── Table: Users
+        │   │   ├── View: UserSummary
+        │   │   ├── Stored Procedure: GetUsers
+        │   │   └── Function: fn_UserCount
+        │   │
+        │   ├── Schema: sales
+        │   │   ├── Table: Orders
+        │   │   └── View: MonthlySales
+        │   │
+        │   └── Schema: security
+        │       └── Table: Roles
+        │
+        ├── Database 2
+        │   │
+        │   ├── Schema: dbo
+        │   │   ├── Table: Products
+        │   │   └── Stored Procedure: GetProducts
+        │   │
+        │   └── Schema: inventory
+        │       └── Table: Stock
+        │
+        └── Database 3
+            └── Schema: dbo
+                └── Table: Logs
 */
 
 -- * Subqueries
@@ -1568,7 +1605,7 @@
             FROM CTE_Hierarchy;
 */
 
---* Example: Recursive CTE – Employee Hierarchy (Step by Step)
+-- * Example: Recursive CTE – Employee Hierarchy (Step by Step)
 /*
     Example Data (Sales.Employees):
 
@@ -1705,4 +1742,243 @@
         SQL Server stops recursion automatically and returns the final result set.
 */
 
+-- * Views
+/*
+    A View is a virtual table based on the result set of a stored SQL query.
+    It stores ONLY the query definition and metadata, NOT the actual data.
 
+    Table VS View
+        Table
+            - Data is physically persisted in the database
+            - Used for transactional operations (INSERT, UPDATE, DELETE).
+
+        View
+            - Data is NOT persisted (virtual result set)
+            - Used for read-only operations (SELECT).
+
+    CTE VS View
+        CTE
+            - Used to reduce redundancy in ONE query.
+            - Improves reusability within a single query.
+            - Temporary and exists only during query execution.
+            - Automatically cleaned up after execution.
+
+        View
+            - Reduces redundancy across MULTIPLE queries.
+            - Reusable at database / project level.
+            - Persisted query logic.
+            - Requires maintenance (CREATE / ALTER / DROP)
+
+    Use Cases
+        1. Central Query Logic
+            - Store complex joins, filters, and calculations in one place.
+            - Reduce duplication across the project.
+            - Improve consistency and maintainability.
+
+        2. Hide the Complexity of the Data
+            - Abstract complex table structures and relationships.
+            - Expose a simple and clean interface to consumers.
+            - Prevent users from dealing with joins and business logic.
+
+        3. Enforce Security and Hide Sensitive Data
+            - Expose only required columns to users.
+            - Hide sensitive data such as salaries or personal information.
+            - Control data access using permissions on views instead of tables.
+
+    Syntax:
+        CREATE VIEW Schema.View_Name AS (
+            SELECT
+                col1,
+                col2
+            FROM table
+            WHERE condition
+        )
+
+    Example
+        CREATE VIEW Sales.V_MonthlySummary AS (
+            SELECT
+                MONTH(OrderDate) AS Month,
+                COUNT(*) AS TotalOrders,
+                SUM(Quantity) AS TotalQuantities,
+                SUM(Sales) AS TotalSales
+            FROM Sales.Orders
+            GROUP BY MONTH(OrderDate)
+        )
+
+    Drop View
+        DROP VIEW Schema.View_Name
+
+    Update View
+        ALTER VIEW Schema.View_Name AS (
+            SELECT
+                newCol1,
+                newCol2
+            FROM table
+            WHERE condition
+        )
+        OR
+
+        IF OBJECT_ID('Schema.View_Name', 'V') IS NOT NULL
+            DROP VIEW Schema.View_Name
+        GO
+        CREATE VIEW Schema.View_Name AS (
+            SELECT
+                newCol1,
+                newCol2
+            FROM table
+            WHERE condition
+        )
+    
+    How SQL Server Executes Views
+        1. When a view is created, SQL Server stores the view definition (the SELECT statement) and metadata in the system catalog.
+
+        2. When a view is queried, SQL Server replaces the view name with its stored SELECT statement and builds one final query.
+
+        3. SQL Server executes this final query directly on the underlying physical tables and returns the result set.
+
+        4. When a view is dropped, only the view definition is removed. The data in the base tables is NOT affected.
+*/
+
+-- * Types Of Tables
+/*
+    [1] Permanent Tables
+
+        A: CREATE / INSERT
+            CREATE (DDL)
+                - Defines the structure of the table (columns, data types, constraints).
+            INSERT (DML)
+                - Adds data to the table after it is created.
+
+            Syntax:
+                CREATE TABLE table_name (
+                    column1 datatype,
+                    column2 datatype,
+                    ...
+                );
+
+                INSERT INTO table_name (column1, column2, ...)
+                VALUES
+                    (value1, value2, ...),
+                    (value1, value2, ...),
+                    (value1, value2, ...);
+
+        B: CTAS (Create Table As Select)
+            - Creates a new permanent table based on the result of a SELECT query.
+            - Table structure and data are created at the same time.
+
+            Syntax (MySQL, PostgreSQL, Oracle):
+                CREATE TABLE new_table_name AS
+                SELECT
+                    col1,
+                    col2,
+                    ...
+                FROM
+                    existing_table_name
+                WHERE
+                    condition;
+
+            Syntax (SQL Server):
+                SELECT
+                    col1,
+                    col2,
+                    ...
+                INTO
+                    new_table_name
+                FROM
+                    existing_table_name
+                WHERE
+                    condition;
+
+            Example:
+                SELECT
+                    DATENAME(MONTH, OrderDate) AS OrderMonth,
+                    COUNT(*) AS TotalOrders
+                INTO Sales.MonthlyOrders
+                FROM Sales.Orders
+                GROUP BY DATENAME(MONTH, OrderDate);
+
+            Updating a CTAS Table
+                - CTAS tables do NOT update automatically.
+                - Common approach: drop the table and recreate it.
+
+            Example:
+                IF OBJECT_ID('Sales.MonthlyOrders', 'U') IS NOT NULL
+                    DROP TABLE Sales.MonthlyOrders;
+                GO
+
+                SELECT
+                    DATENAME(MONTH, OrderDate) AS OrderMonth,
+                    COUNT(*) AS TotalOrders
+                INTO Sales.MonthlyOrders
+                FROM Sales.Orders
+                GROUP BY DATENAME(MONTH, OrderDate);
+
+            Use Cases:
+                1. Performance Optimization
+                    - Persist complex query logic in table and provide fast read as data is already materialized.
+
+                2. Data Snapshots
+                    - Useful for capturing data at a specific point in time.
+
+
+    [2] Temporary Tables
+        Stores intermediate results in a temporary storage (PHYSICAL) within database during the session.
+
+        The database will automatically drops the temporary table once the session ends.
+        (System databases -> tempdb -> Temporary Tables)
+
+        Syntax:
+            SELECT
+                col1,
+                col2,
+                ...
+            INTO
+                #temp_table_name -- This '#' what made it temporary.
+            FROM
+                existing_table_name
+            WHERE
+                condition;
+*/
+
+-- * Comparison (Subquery vs CTE vs TMP vs CTAS vs VIEW)
+/*
+    [1] Subquery
+        Storage: Cache
+        Lifetime: Temporary
+        When Deleted: End of Query
+        Scope: Single Query
+        Reusability: Limited (1 time - 1 query)
+        Up2Date: Yes
+
+    [2] CTE (Common Table Expression)
+        Storage: Cache
+        Lifetime: Temporary
+        When Deleted: End of Query
+        Scope: Single Query
+        Reusability: Limited (multi-times - 1 query)
+        Up2Date: Yes
+
+    [3] TMP (Temporary Table)
+        Storage: Disk (tempdb)
+        Lifetime: Temporary
+        When Deleted: End of Session
+        Scope: Multi-Queries
+        Reusability: Medium (multi queries during session)
+        Up2Date: No
+
+    [4] CTAS (Create Table As Select)
+        Storage: Disk
+        Lifetime: Permanent
+        When Deleted: DDL (DROP)
+        Scope: Multi-Queries
+        Reusability: High (multi queries)
+        Up2Date: No
+
+    [5] VIEW
+        Storage: No Storage
+        Lifetime: Permanent
+        When Deleted: DDL (DROP)
+        Scope: Multi-Queries
+        Reusability: High (multi queries)
+        Updatable: Yes
+*/
