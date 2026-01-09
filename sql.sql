@@ -566,6 +566,7 @@
                 LEFT(value, length)
                 RIGHT
                 SUBSTRING(value, start "1-based-indexed", length)
+                STRING_AGG(value, separator)
 
             2. Numeric Functions
                 ROUND(value, decimal_places)
@@ -1982,3 +1983,381 @@
         Reusability: High (multi queries)
         Updatable: Yes
 */
+
+-- * Query Lifecycle
+/*
+    [1] Parsing
+        - SQL Server checks the query for syntax errors.
+        - Ensures SQL keywords, clauses, and structure are valid.
+        - Performs name resolution (tables, columns, schemas).
+
+    [2] OPTIMIZATION PHASE (Query Optimizer) 
+        - SQL Server decides how to execute the query efficiently.
+        - Uses metadata and statistics to evaluate multiple strategies.
+        - Chooses the lowest-cost execution plan (CPU, I/O, memory).
+
+    [3] QUERY TREE (Logical Processing Order)
+        - SQL Server converts the optimized logic into a logical query tree.
+        - Execution follows a SPECIFIC logical order:
+            [1] FROM
+            [2] WHERE
+            [3] GROUP BY
+            [4] HAVING
+            [5] (SELECT -> DISTINCT "is applied during selection")
+            [6] ORDER BY
+            [7] TOP / LIMIT(MYSQL, POSTGRESQL)
+
+    [4] EXECUTION PLAN (Physical Execution)
+        - SQL Server generates a PHYSICAL execution plan.
+        - Defines HOW data is accessed and processed.
+        - The plan is stored in PLAN CACHE for reuse.
+        - For stored procedures, the plan can be reused (improves performance)
+*/
+
+-- * Stored Procedures
+/*
+    Definition:
+        - A stored procedure is a precompiled set of SQL statements.
+        - Can accept parameters (INPUT, OUTPUT, INPUT/OUTPUT).
+        - Precompiled: SQL Server parses, validates, and creates an execution plan in advance.
+
+    Syntax
+        [A] Definition:
+            CREATE PROCEDURE procedure_name
+            AS
+            BEGIN
+                -- Logic
+            END
+
+        [B] Execution
+            Positional parameters
+            EXEC procedure_name arg1, arg2;
+
+            Named parameters (recommended)
+            EXEC procedure_name 
+                @param1 = arg1, 
+                @param2 = arg2;
+
+            Using default value for @param2
+            EXEC procedure_name arg1;
+
+    Advantages of Stored Procedures
+        1. Encapsulation & Reusability
+            - Business logic centralized.
+            - Can be reused by multiple applications or queries.
+
+        2. Security
+            - Limits direct table access.
+            - Permissions granted on procedure instead of underlying tables.
+
+        3. Performance
+            - Execution plan cached and reused.
+            - Reduces parsing and optimization overhead.
+
+        4. Accepting Parameters
+            - INPUT, OUTPUT, INPUT/OUTPUT supported.
+
+        5. Error Handling
+            - Supports TRY...CATCH blocks.
+
+    WITH ENCRYPTION in Stored Procedures
+        - Hide the definition (source code) of a stored procedure from users.
+        - Users can view the definition using: sp_helptext procedure_name 
+        Syntax
+            CREATE PROCEDURE procedure_name
+            WITH ENCRYPTION
+            AS
+            BEGIN
+                -- Logic
+            END
+
+    Example (Handle Error and Control Flow)
+        CREATE PROCEDURE sp_GetCustomerSummary
+        @country VARCHAR(50) = 'USA'
+        AS
+        BEGIN
+            BEGIN TRY
+                -- Declare Variables
+                DECLARE 
+                    @totalCustomers INT,
+                    @avgScore FLOAT;
+            
+                -- Preparing And Cleaning Data (Control Flow)
+                IF EXISTS (
+                    SELECT 1 FROM Sales.Customers
+                    WHERE Country = @country
+                    AND Score IS NULL
+                )
+                BEGIN
+                    PRINT ('Updating NULL scores to 0.');
+
+                    UPDATE Sales.Customers
+                    SET Score = 0
+                    WHERE Country = @country
+                    AND Score IS NULL;
+                END
+
+                ELSE
+                BEGIN
+                    PRINT ('No NULL scores found.');
+                END
+            
+                -- Generating Reports.
+                -- Report 1 (Total Customers & Average Score)
+                SELECT
+                    @totalCustomers = COUNT(*),
+                    @avgScore = AVG(CAST(Score AS FLOAT))
+                FROM Sales.Customers
+                WHERE Country = @country
+                PRINT(CONCAT('Total customers from ', @country, ': ', @totalCustomers));
+                PRINT(CONCAT('Average score from ', @country, ': ', @AvgScore));
+
+                -- Report 2 (Total Orders & Total Sales)
+                SELECT
+                    COUNT(*) AS TotalOrders,
+                    SUM(Sales) AS TotalSales,
+                    1/0 -- Intentionally causing an error
+                FROM Sales.Orders AS o
+                JOIN Sales.Customers AS c
+                    ON c.CustomerID = o.CustomerID
+                WHERE c.Country = @country
+            END TRY
+
+            BEGIN CATCH
+                PRINT('An error occurred.');
+                PRINT(CONCAT('Error Message: ', ERROR_MESSAGE()));
+                PRINT(CONCAT('Error Number: ', ERROR_NUMBER()));
+                PRINT(CONCAT('Error Line: ', ERROR_LINE()));
+                PRINT(CONCAT('Stored Procedure: ', ERROR_PROCEDURE()));
+            END CATCH
+        END
+
+    INSERT based on EXECUTE
+        Is used to insert the result set returned by a stored procedure into a table or table variable.
+
+        INSERT INTO table_name/table_variable 
+        EXEC procedure_name
+
+        Example:
+            CREATE PROCEDURE sp_GetEmployeeByID
+                @id INT
+            AS
+            BEGIN
+                SELECT
+                    EmployeeID,
+                    CONCAT(FirstName, ' ', LastName) AS EmployeeName,
+                    Salary
+                FROM Sales.Employees
+                WHERE EmployeeID = @id
+            END
+
+            GO
+
+            DECLARE @T TABLE (
+                EmployeeID INT,
+                EmployeeName VARCHAR(100),
+                Salary INT
+            )
+
+            INSERT INTO @T
+            EXEC sp_GetEmployeeByID
+                @id = 1;
+
+            SELECT *
+            FROM @T AS e
+            JOIN Sales.Orders AS o
+                ON e.EmployeeID = o.SalesPersonID
+
+    Parameters in stored procedures:
+        [1] INPUT (default)
+
+        [2] OUTPUT
+            CREATE OR ALTER PROCEDURE sp_GetEmployeeSalary
+                @id INT,
+                @salary INT OUTPUT
+            AS
+            BEGIN
+                SELECT @salary = Salary
+                FROM Sales.Employees
+                WHERE EmployeeID = @id
+            END
+
+            DECLARE @empSalary INT;
+
+            EXEC sp_GetEmployeeSalary 
+                @id = 1,
+                @salary = @empSalary OUTPUT
+
+            SELECT @empSalary AS Salary
+
+        [3] INPUT/OUTPUT
+            CREATE PROCEDURE sp_GetCustomerScore
+                @x INT OUTPUT
+            AS
+            BEGIN
+                SELECT @x = Score
+                FROM Sales.Customers
+                WHERE CustomerID = @x
+            END
+
+            DECLARE @customerScore INT = 1;
+
+            EXEC sp_GetCustomerScore
+                @x = @customerScore OUTPUT 
+
+            SELECT @customerScore AS CustomerScore
+
+    Dynamic Query
+        CREATE PROCEDURE sp_GetData
+            @table VARCHAR(100),
+            @column VARCHAR(100) = '*'
+        AS
+        BEGIN
+            EXECUTE('SELECT ' + @column + ' FROM ' + @table)
+        END
+
+        EXEC sp_GetData
+            @table = 'Sales.Orders',
+            @column = 'Sales'
+
+        Issues / Not Recommended:
+            1. SQL Injection Risk
+                - User can pass malicious table/column names to modify or delete data.
+                Example:
+                    EXEC sp_GetData
+                        @table = 'Sales.Orders; DROP TABLE Sales.Orders;--',
+                        @column = 'Sales'
+
+            2. Exposes Database Objects
+                - Any table or column can be accessed, revealing sensitive info.
+
+            3. Performance
+                - Dynamic SQL is not precompiled; execution plan cannot be cached efficiently.
+                
+            4. Maintenance
+                - Changes in table/column names can break the procedure.
+
+    Updating Stored Procedure
+        ALTER PROCEDURE sp_GetCustomerSummary 
+            @country VARCHAR(50) = 'USA'
+        AS
+        BEGIN
+            -- Update logic
+        END
+
+    Dropping Stored Procedure
+        DROP PROCEDURE procedure_name;
+*/
+
+-- * Triggers
+/*
+    Definition:
+        Triggers are special stored procedures that execute automatically when specific events occur on a table or database.
+
+    Trigger Types:
+        [1] DML Triggers (Data Manipulation Language)
+            Fired when data inside a table is modified.
+
+            Events:
+                - INSERT
+                - UPDATE
+                - DELETE
+
+            Execution Types:
+                - AFTER Trigger
+                    Runs AFTER the event occurs.
+                    The operation is already completed.
+
+                - INSTEAD OF Trigger
+                    Runs INSTEAD OF the event.
+                    Replaces the original operation.
+
+            Example Use Cases:
+                - Enforcing business rules
+                - Auditing data changes
+                - Preventing invalid data modifications
+
+
+        [2] DDL Triggers (Data Definition Language)
+            Fired when database schema objects are changed.
+
+            Events:
+                - CREATE
+                - ALTER
+                - DROP
+
+            Scope:
+                - Database-level
+                - Server-level
+
+            Example Use Cases:
+                - Preventing schema changes
+                - Auditing object creation or deletion
+                - Enforcing naming conventions
+
+
+        [3] LOGON Triggers
+            Fired when a user attempts to log in to SQL Server.
+
+            Scope:
+                - Server-level only
+
+            Example Use Cases:
+                - Restricting login times
+
+    Syntax:
+        CREATE TRIGGER trigger_name
+        ON table_name
+        AFTER / INSTEAD OF (INSERT / UPDATE / DELETE)
+        AS
+        BEGIN
+            -- Trigger logic
+        END
+
+    Example
+        CREATE TRIGGER trg_AfterInsertEmployee
+        ON Sales.Employees
+        AFTER INSERT
+        AS
+        BEGIN
+            INSERT INTO Sales.EmployeesLogs (EmployeeID, LogMessage, LogDate)
+            SELECT 
+                EmployeeID,
+                CONCAT('New Employee Added: ', EmployeeID),
+                GETDATE()
+            FROM INSERTED -- Virtual table that holds a copy of the rows that are being inserted into the target table
+        END
+*/
+
+
+-- * STRING_AGG
+/*
+    Is an SQL aggregate function that concatenates values from multiple rows into a single string, separated by a delimiter.
+
+    Syntax:
+        SELECT 
+            STRING_AGG(column_name, delimiter) 
+        FROM table_name
+        WHERE condition
+
+    With GROUP BY
+        It supports aggregation within a group.
+
+        Example:
+            SELECT 
+                Category,
+                STRING_AGG(Product, ', ') AS Products
+            FROM Orders
+            GROUP BY Category;
+
+    Ordering the Result
+        Using WITHIN GROUP (ORDER BY Name)
+
+        Example:
+            SELECT 
+                Category,
+                STRING_AGG(Product, ', ') WITHIN GROUP (ORDER BY Product) AS Products
+            FROM Orders
+            GROUP BY Category;
+*/
+    
