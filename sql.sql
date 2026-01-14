@@ -31,6 +31,30 @@
     SCHEMA
         A logical container to group related database objects.
         A database can have multiple schemas.
+        Schema solves 3 main problems
+            1. Naming Conflicts
+                You cannot create two objects with the same name inside the same schema.
+
+            2. Logical organization
+                Schemas provide logical grouping of database objects.
+
+            3. Security
+                Schemas allow you to control permissions at a higher level.
+
+        Creating schema (DDL)
+            CREATE SCHEMA schemaName 
+
+        Altering schema (DDL)
+            Is mainly used to transfer objects (tables, views, etc.) from one schema to another.
+
+            ALTER SCHEMA schemaName 
+            TRANSFER sourceSchema.objectName; 
+
+        Dropping schema 
+            The schema must be empty.
+
+            DROP SCHEMA schemaName
+
 
     TABLE
         Stores data in columns (fields) and rows (records).
@@ -269,6 +293,23 @@
             SELECT TOP n col
             FROM table;
 
+            WITH TIES
+                Include additional rows that have the same value as the last row.
+                ORDER BY is MANDATORY when using WITH TIES.
+
+                SELECT TOP n WITH TIES col
+                FROM table;
+                ORDER BY col ASC
+
+    SELECT + Shuffle
+        NEWID() -> returns a unique identifier GUID
+        
+        SELECT *
+        FROM table
+        ORDER BY NEWID();
+        SQL engine creates GUID for each row and order by this unique identifier
+
+    
     Coding Order
         SELECT TOP n
             col1,
@@ -360,8 +401,7 @@
                 1. Have a DEFAULT value
                 2. Have a NOT NULL constraint
                 3. Have an IDENTITY constraint
-
-            
+       
 
     [2] UPDATE .. SET
         UPDATE table_name
@@ -410,12 +450,15 @@
                 '\%'  ESCAPE '\'
 
         To search for a range
-            [a-z] -> (a to z) OR (A to Z) -> case insensitive
+            [a-zA-z] -> (a to z and A to Z)
             [0-9] -> (0 to 9)
 
         To exclude characters [^...]
             [^a-z] -> any char not a to z
-            [^abc] -> any char not a, b, or c 
+            [^abc] -> any char not a, b, or c
+
+        To search for (a or b or c)
+            [abc] -> a or b or c
 */
 
 -- * Joins
@@ -651,17 +694,26 @@
 
     2. CONVERT
     Casting + Date/Time formatting
-    Converts: Any Type → Any Type
+    Converts: Any Type -> Any Type
     Can format ONLY Date & DateTime using style codes
     Usage example:
         CONVERT(VARCHAR(20), GETDATE(), 34)
 
     3. FORMAT
     Full formatting (Date, Time, Number, Money)
-    Converts: Any Type → STRING only
+    Converts: Any Type -> STRING only
     Supports culture/locale ('en-US', 'ar-EG')
     Usage example:
         FORMAT(GETDATE(), 'dddd, dd MMM yyyy', 'en-US')   
+
+    4. CONCAT
+        Converts: Any Type -> String
+        Replace NULLs with an empty string
+        Example: 
+            Select FName + ‘ ‘ + Convert (Varchar (3), Age) From Students 
+                If FName or Age is null, this whole string will return null
+
+            Select Concat(FName, ‘ ‘ , Age) From Students 
 */
 
 -- * NULL Functions
@@ -1898,6 +1950,13 @@
                 FROM Sales.Orders
                 GROUP BY DATENAME(MONTH, OrderDate);
 
+
+            Coping the structure without data from existing table
+                SELECT *
+                INTO new_table 
+                FROM existing_table 
+                WHERE 1 = 2; -- False condition  
+
             Updating a CTAS Table
                 - CTAS tables do NOT update automatically.
                 - Common approach: drop the table and recreate it.
@@ -2267,10 +2326,13 @@
                 - AFTER Trigger
                     Runs AFTER the event occurs.
                     The operation is already completed.
+                    Can create more than one (AFTER trigger) on the same table. 
+
 
                 - INSTEAD OF Trigger
                     Runs INSTEAD OF the event.
                     Replaces the original operation.
+                    Can't Create more than one (INSTEAD OF trigger) on the same table.
 
             Example Use Cases:
                 - Enforcing business rules
@@ -2294,6 +2356,15 @@
                 - Preventing schema changes
                 - Auditing object creation or deletion
                 - Enforcing naming conventions
+
+            Creating a Read-only Table
+                CREATE TRIGGER trg_ReadOnlyTable
+                ON Sales.Employees
+                INSTEAD OF INSERT, UPDATE, DELETE
+                AS
+                BEGIN
+                    SELECT 'Read-only table. Insert, update, and delete operations are not allowed.'
+                END 
 
 
         [3] LOGON Triggers
@@ -2327,8 +2398,43 @@
                 GETDATE()
             FROM INSERTED -- Virtual table that holds a copy of the rows that are being inserted into the target table
         END
-*/
 
+    Disabling and Enabling Triggers
+        ALTER TABLE Student DISABLE TRIGGER trigger_name  
+        ALTER TABLE Student ENABLE TRIGGER trigger_name
+
+
+    Notes:
+        1. The trigger will automatically take the schema name of table we create trigger on.
+        2. When firing trigger (After/Instead of), two virtual tables are created (Same structure as original table):: 
+            - Inserted 
+            - Deleted
+
+            Insert case: 
+                Inserted table -> Contains the inserted values (Or try to insert). 
+                Deleted table -> Empty 
+
+            Delete case: 
+                Inserted table -> Empty 
+                Deleted table -> Contains the deleted values (Or try to delete). 
+
+            Update case: 
+                Inserted table -> Contains the new values 
+                Deleted table -> Contains the old values 
+
+        3. OUTPUT
+            - Acts like a runtime trigger (but it is NOT a trigger)
+            - Can be used with: INSERT, UPDATE, DELETE
+            Example:
+                UPDATE Topic
+                SET Top_Name = 'Database Design'
+                OUTPUT
+                    SUSER_NAME() AS [CurrentUser],
+                    inserted.*
+                INTO anotherTable
+                WHERE Top_Id = 5;
+              
+*/
 
 -- * STRING_AGG
 /*
@@ -2360,4 +2466,604 @@
             FROM Orders
             GROUP BY Category;
 */
-    
+
+-- * Indexes
+/*
+    Definition:
+        An index is a data structure that provides fast access to data, improving the performance of queries.
+
+    Types:
+        [1] By Structure
+            A: Clustered Index
+            B: Nonclustered Index
+
+        [2] By Storage
+            A: Row-store Index
+            B: Column-store Index
+
+        [3] By Function
+            A: Unique Index
+            B: Filtered Index
+
+    How data stored in Database?
+        Data is stored on disk in data files (.mdf files).
+        Inside these files, data is stored in units called pages
+
+        What is a page?
+            The smallest unit of storage in a database (8kb).
+            It stores anything (Data, Metadata, Indexes, etc).
+
+            Types of pages:
+                [1] Data Page
+                [2] Index Page
+
+        How is data stored in pages?
+            Each page consists of:
+                1. Header Section
+                    - Stores metadata about the page.
+                    - Examples: page ID (FileID:PageID like 1:150), page type, amount of free space, etc.
+
+                2. Data Section
+                    - Stores the actual rows.
+                    - The SQL Server engine tries to fit as many rows as possible into a single page.
+
+                3. Offset Array
+                    - Contains pointers to the starting position of each row.
+                    - Allows SQL Server to quickly locate rows inside the page.
+*/
+
+-- * Indexes By Structure (1. Clustered Index)
+/*
+    What is a Heap Table?
+        - A table without a clustered index.
+        - Rows aren't stored in any particular order.
+
+        Advantages:
+            - Fast inserts (writes) as SQL Server doesn't need to maintain any order.
+
+        Disadvantages:
+            - Slower reads as SQL Server must scan all data pages and within each page, it scans each row to find matching data [Full Table Scan].
+
+    What happens when you create a Clustered Index?
+        
+        1. Physical Data Ordering
+            SQL Server physically sorts the data inside the Data Pages based on the clustered index key.
+
+        2. B-Tree Creation
+            SQL Server builds a B-Tree (Balanced Tree) to efficiently locate rows.
+            
+            B-Tree Structure (Bottom to Top):
+
+                1) Leaf Nodes (Data Pages) - Level 0
+                    - Contain the ACTUAL data.
+                    - Pages are linked in a doubly-linked list for efficient range scans.
+                    - Data is sorted by the clustered index key.
+
+                    Example:
+                        Data Page: 1:100 (IDs 1–5)
+                            Data:
+                                1, Bob, 25, 'New York'
+                                2, Alice, 30, 'London'
+                                3, Charlie, 28, 'Paris'
+                                4, David, 35, 'Tokyo'
+                                5, Eve, 22, 'Berlin'
+                            ↓ (Next Page Pointer)
+                        
+                        Data Page: 1:101 (IDs 6–10)
+                            Data:
+                                6, John, 40, 'Sydney'
+                                7, Mary, 27, 'Rome'
+                                8, Tom, 33, 'Madrid'
+                                9, Sarah, 29, 'Dublin'
+                                10, Mike, 31, 'Oslo'
+                            ↓ (Next Page Pointer)
+
+                2) Intermediate Nodes (Index Pages) - Level 1+
+                    - Contain key-range pairs:
+                        key   -> The minimum key value in the leaf data pages.
+                        value -> Pointer to the leaf data page.
+                    - Multiple intermediate nodes levels may exist for large tables.
+                    - Do NOT contain actual table data.
+
+                    Example:
+                        Index Page: 1:200 (Level 1)
+                            Key -> Page Pointer:
+                                1   -> 1:100   -- Points to page with IDs 1–5
+                                6   -> 1:101   -- Points to page with IDs 6–10
+                                11  -> 1:102   -- Points to page with IDs 11–15
+                                16  -> 1:103   -- Points to page with IDs 16–20
+                                ...
+
+                        Index Page: 1:201 (Level 1)
+                            Key -> Page Pointer:
+                                51  -> 1:105
+                                61  -> 1:106
+                                71  -> 1:107
+                                ...
+
+                3) Root Node (Index Page) - Top Level
+                    - Contains pointers to the Intermediate Nodes.
+                    - Only ONE root node per index.
+
+                    Example:
+                        Root Page: 1:300
+                            Key -> Page Pointer:
+                                1   -> 1:200   -- Points to intermediate page for IDs 1–50
+                                51  -> 1:201   -- Points to intermediate page for IDs 51–100
+                                101 -> 1:202   -- Points to intermediate page for IDs 101–150
+                                ...
+
+        3. Search Process Example
+            Query: SELECT * FROM Users WHERE UserID = 13
+
+            Step 1: Start at Root Node (1:300)
+                - SQL Server reads: "13 falls between 1 and 51"
+                - Follows pointer to Intermediate Node 1:200
+
+            Step 2: Navigate to Intermediate Node (1:200)
+                - SQL Server reads: "13 falls between 11 and 16"
+                - Follows pointer to Data Page 1:102
+
+            Step 3: Read Data Page (1:102)
+                - SQL Server scans the page to find UserID = 13
+                - Returns the entire row: 13, Frank, 26, 'Amsterdam'
+
+            I/O Operations:
+                B-Tree Structure: 3 page reads (Root → Intermediate → Data)
+                vs
+                Heap Structure: Could require reading ALL pages in the table
+
+    Clustered Index Characteristics:
+
+        Advantages:
+            1. Fast Range Queries (ORDER BY, BETWEEN, >, <):
+                Because data is physically sorted by the clustered index key 
+                and each data page points to the next data page (doubly-linked list).
+
+                Example: 
+                    SELECT * FROM Orders WHERE OrderDate BETWEEN '2024-01-01' AND '2024-01-31'
+
+                    **With Clustered Index on OrderDate**
+                        Physical Storage (Data Pages sorted by OrderDate):
+
+                        Page 1:100 (Jan 1-5)
+                        ┌─────────────────────────────────────┐
+                        │ 2024-01-01, Order details...        │
+                        │ 2024-01-02, Order details...        │
+                        │ 2024-01-03, Order details...        │
+                        │ 2024-01-04, Order details...        │
+                        │ 2024-01-05, Order details...        │
+                        └─────────────────────────────────────┘
+                                ↓ (Next page pointer)
+
+                        Page 1:101 (Jan 6-10)
+                        ┌─────────────────────────────────────┐
+                        │ 2024-01-06, Order details...        │
+                        │ 2024-01-07, Order details...        │
+                        │ 2024-01-08, Order details...        │
+                        │ 2024-01-09, Order details...        │
+                        │ 2024-01-10, Order details...        │
+                        └─────────────────────────────────────┘
+                                ↓ (Next page pointer)
+
+                        Page 1:102 (Jan 11-15)
+                        ┌─────────────────────────────────────┐
+                        │ 2024-01-11, Order details...        │
+                        │ 2024-01-12, Order details...        │
+                        │ ...                                 │
+                        └─────────────────────────────────────┘
+                                ↓
+                            ... continues to Jan 31
+
+                    **How SQL Server Executes the Query**
+                        Step 1: Index Seek to Find Starting Point
+                            - Navigate B-Tree to find first row where OrderDate = '2024-01-01'
+                            - Lands on Page 1:100
+                            - I/O Cost: 2-3 page reads (Root → Intermediate → Leaf/Data)
+
+                        Step 2: Sequential Read (Range Scan)
+                            - Start reading from the first matching row
+                            - Follow the "next page" pointers through the doubly-linked list
+                            - Read pages sequentially: 1:100 → 1:101 → 1:102 → ... → 1:131
+                            - Stop when OrderDate > '2024-01-31'
+                            - I/O Type: Sequential (fast, contiguous reads)
+
+                        Step 3: Return Results
+                            - All matching rows are found in contiguous pages
+                            - No jumping around on disk
+                            - Data already sorted (no additional sorting needed)
+
+                    With Heap Structure (No Clustered Index), SQL Server must scan all data pages and within each page, it scans each row to find matching data [Full Table Scan]
+
+            2. Fast Lookups on the Clustered Key:
+                Direct navigation through B-Tree to data.
+
+        Disadvantages:
+            1. Slower Writes (INSERT, UPDATE, DELETE):
+                Must maintain physical sort order.
+                May cause page splits.
+
+            2. Page Splits:
+                What: When a data page is full and a new row must be inserted in the middle.
+                How: SQL Server splits the page, moving ~50% of rows to a new page.
+                Impact:
+                    - Increases I/O operations.
+                    - Wastes storage space.
+                Example:
+                    Page 1:100 is FULL with OrderDates [2025-01-01, 2025-01-02, 2025-01-04, 2025-01-05]
+                    INSERT new row with OrderDate = 2025-01-03
+                    Result:
+                        Page 1:100: [2025-01-01, 2025-01-02]
+                        Page 1:150: [2025-01-03, 2025-01-04, 2025-01-05]  <- New page created
+
+            3. Only ONE Clustered Index Per Table:
+                Data can only be physically sorted only ONCE.
+
+    Clustered Index vs Primary Key:
+
+        Primary Key:
+            - A logical constraint ensuring uniqueness and non-NULL.
+            - By default, SQL Server creates a CLUSTERED index on the primary key.
+            - Can be NONCLUSTERED if specified.
+
+        Clustered Index:
+            - A physical storage structure.
+            - Doesn't have to be on the primary key.
+            - Doesn't have to be unique (but SHOULD be for best performance).
+                If not unique, SQL Server adds a hidden 4-byte "uniqueifier" to make rows unique.
+
+        Syntax Examples:
+            A) Primary Key with Clustered Index (default)
+                CREATE TABLE Orders (
+                    OrderID INT PRIMARY KEY,  -- Creates clustered index
+                    OrderDate DATETIME
+                );
+
+            B) Primary Key with Non-Clustered Index
+                CREATE TABLE Orders (
+                    OrderID INT PRIMARY KEY NONCLUSTERED,  -- Non-clustered
+                    OrderDate DATETIME,
+                    INDEX IX_OrderDate CLUSTERED (OrderDate)  -- Clustered on different column
+                );
+
+            C) Clustered Index without Primary Key
+                CREATE TABLE Orders (
+                    OrderID INT UNIQUE NONCLUSTERED,
+                    OrderDate DATETIME,
+                    INDEX IX_OrderDate CLUSTERED (OrderDate)  -- No primary key needed
+                );
+
+    Best Practices for Clustered Index Key:
+
+        1. Narrow (Small Size):
+            Use: INT (4 bytes), BIGINT (8 bytes)
+            Avoid: GUID (16 bytes), VARCHAR(100+)
+            Why: Non-clustered indexes store the clustered key, so wide keys waste space.
+
+        2. Unique:
+            Use: Primary key or unique column
+            Avoid: Non-unique columns
+            Why: If not unique, SQL Server adds a 4-byte uniqueifier to each row.
+            Impact: Increases index size and reduces performance.
+
+        3. Static (Unchanging):
+            Use: Identity columns, immutable values
+            Avoid: Frequently updated columns (Status, LastModified)
+            Why: 
+                - Updating the clustered key moves the entire row.
+                - Updates ALL non-clustered indexes pointing to that row.
+            Example:
+                Bad: Clustered index on CustomerName (users change names)
+                Good: Clustered index on CustomerID (never changes)
+
+        4. Ever-Increasing (Sequential):
+            Use: IDENTITY, auto-incrementing values, NEWSEQUENTIALID()
+            Avoid: NEWID() (random GUID), random values
+            Why: New rows are added at the end, avoiding page splits.
+            Example:
+                Good:
+                    CustomerID INT IDENTITY(1,1) PRIMARY KEY CLUSTERED
+                    Inserts: 1, 2, 3, 4, 5... (always at the end)
+                
+                Bad:
+                    CustomerID UNIQUEIDENTIFIER DEFAULT NEWID() PRIMARY KEY CLUSTERED
+                    Inserts: {random GUID} causes page splits throughout the table
+
+    When to Use Heap Tables (No Clustered Index):
+
+        1. Very small tables (< 100 rows):
+            Overhead of B-Tree not worth it.
+            Table scan is already fast.
+
+        2. Write-once, read-never tables (logging/auditing):
+            If data is archived and rarely queried.
+
+    Notes:
+        - A table can have only ONE clustered index because data can be physically ordered only once.
+        - Leaf nodes contain the ACTUAL table data (all columns), unlike non-clustered indexes.
+        - All non-clustered indexes reference the clustered key (or RID if heap).
+        - In most cases, an INT IDENTITY column is the best choice for a clustered index key.
+*/
+
+-- * Indexes By Structure (2. Non-Clustered Index)
+/*
+
+    What happens when you create a Non-Clustered Index?
+        
+        1. Data Pages Remain Unchanged:
+            SQL Server does NOT reorder the data inside the Data Pages.
+            Data can remain as a heap or in clustered index order.
+
+        2. B-Tree Creation:
+            SQL Server builds a separate B-Tree structure.
+
+            B-Tree Structure (Bottom to Top):
+
+                1) Leaf Nodes (Index Pages) - Level 0:
+                    - SQL Server creates index pages (NOT data pages).
+                    - Each index page contains key-value pairs:
+                        key   -> The column(s) on which the non-clustered index is created.
+                        value -> A pointer to the actual row location.
+
+                    Row Locator (Pointer) Types:
+                        If table has a Clustered Index: value = Clustered Index Key
+                        If table is a Heap: value = Row Identifier (RID)
+
+                    Example (Heap Table):
+                        Index Page: 1:200
+                            Key (LastName)  -> RID:
+                                'Anderson'  -> 1:102:96   -- File 1, Page 102, Slot 96
+                                'Brown'     -> 1:101:140
+                                'Clark'     -> 1:101:188
+                                'Davis'     -> 1:103:52
+                                'Evans'     -> 1:102:220
+                                ...
+
+                        Index Page: 1:201
+                            Key (LastName)  -> RID:
+                                'Fisher'    -> 1:102:224
+                                'Garcia'    -> 1:102:224
+                                'Lewis'     -> 1:102:228
+                                'Morgan'    -> 1:102:232
+                                'Nelson'    -> 1:102:236
+
+                    Example (Table with Clustered Index on CustomerID):
+                        Index Page: 1:200
+                            Key (LastName)  -> Clustered Key:
+                                'Anderson'  -> 1025   -- CustomerID
+                                'Brown'     -> 3041
+                                'Clark'     -> 1856
+                                'Davis'     -> 4129
+                                'Evans'     -> 2347
+                                ...
+
+                        Index Page: 1:201
+                            Key (LastName)  -> Clustered Key:
+                                'Fisher'    -> 2348
+                                'Garcia'    -> 2349
+                                'Lewis'     -> 2350
+                                'Morgan'    -> 2351
+                                'Nelson'    -> 2352
+
+                2) Intermediate Nodes (Index Pages) - Level 1+:
+                    - Contain key-range pairs:
+                        key   -> Minimum key value in leaf index pages
+                        value -> Pointer to child page
+                    - Multiple levels may exist for large indexes.
+
+                    Example:
+                        Index Page: 1:300
+                            Key         -> Page Pointer:
+                            'Anderson'  -> 1:200   -- Page with names A-E
+                            'Fisher'    -> 1:201   -- Page with names F-K
+                            'Lewis'     -> 1:202   -- Page with names L-R
+
+                        Index Page: 1:301
+                            Key         -> Page Pointer:
+                            'Morgan'    -> 1:203   -- Page with names M-Z
+                            'Owens'     -> 1:204   -- Page with names O-S
+                            'Smith'     -> 1:205   -- Page with names S-Z
+
+                3) Root Node (Index Page) - Top Level:
+                    - Starting point for all non-clustered index seeks.
+                    - Points to Intermediate Nodes or directly to Leaf Pages.
+
+                    Example:
+                        Root Page: 1:400
+                            Key -> Page Pointer:
+                            'A'   -> 1:300   -- Points to intermediate page for names A-L
+                            'M'   -> 1:301   -- Points to intermediate page for names M-Z
+
+
+        3. Search Process Example:
+
+            Scenario 1: Table with Clustered Index
+                Query: SELECT * FROM Customers WHERE LastName = 'Garcia'
+
+                Step 1: Start at Root Node of Non-Clustered Index
+                    - Find that 'Garcia' is in range pointing to page 1:300
+
+                Step 2: Navigate to Intermediate Node (1:300)
+                    - Find that 'Garcia' falls in range 'Fisher' to 'Lewis'
+                    - Follow pointer to Leaf Page 1:201
+
+                Step 3: Read Leaf Page of Non-Clustered Index (1:201)
+                    - Find 'Garcia' -> Clustered Key = 3041
+
+                Step 4: Lookup in Clustered Index (KEY LOOKUP)
+                    - Use clustered key 3041 to navigate clustered index B-Tree
+                    - Find the data page containing CustomerID = 3041
+                    - Read the entire row
+
+                I/O Operations: 
+                    3 reads for non-clustered index (Root → Intermediate → Leaf)
+                    + 3 reads for clustered index lookup
+                    = 6 total page reads
+
+                This is called a KEY LOOKUP or BOOKMARK LOOKUP
+
+            Scenario 2: Heap Table
+                Query: SELECT * FROM Customers WHERE LastName = 'Garcia'
+
+                Step 1-3: Same as above, but leaf page returns RID
+                    'Garcia' -> RID: 1:101:380
+
+                Step 4: RID Lookup
+                    - Directly access File 1, Page 101, Slot 380
+                    - Read the row
+
+                I/O Operations:
+                    3 reads for non-clustered index
+                    + 1 read for RID lookup
+                    = 4 total page reads
+
+                This is called an RID LOOKUP
+
+    Non-Clustered Index Characteristics:
+
+        Advantages:
+            1. Multiple Non-Clustered Indexes Per Table:
+                - Can create up to 999 non-clustered indexes per table.
+                - Each index can optimize a different query pattern
+                    -- For searching by Email
+                    CREATE NONCLUSTERED INDEX IX_Email ON Users(Email);
+
+                    -- For searching by CreatedAt
+                    CREATE NONCLUSTERED INDEX IX_CreatedAt ON Users(CreatedAt);
+
+
+            2. Doesn't Affect Data Storage:
+                No physical reordering of data.
+
+        Disadvantages:
+            1. Requires Additional Storage:
+                Separate structure from the table data.
+
+            2. Key Lookups Can Be Expensive:
+                If many rows match the query.
+                Each matching row requires a separate lookup(another fetch of the data) to get the other columns data.
+                SQL Server may choose table scan instead.
+
+            3. Slows Down Writes (INSERT, UPDATE, DELETE):
+                Every write must update all non-clustered indexes.
+                More indexes = slower writes.
+
+    Best Practices for Non-Clustered Indexes:
+
+        1. Create indexes based on query patterns:
+            - Index columns used in WHERE, JOIN, and ORDER BY clauses
+            - Prefer highly selective columns
+
+        2. Index column order matters:
+            - Put the most selective (highest cardinality) column first
+            - SQL Server can SEEK on:
+                (first column) or (first + next columns)
+            - SQL Server CANNOT SEEK on:
+                non-leading columns alone
+
+            Example:
+                CREATE INDEX IX_Orders ON Orders(CustomerID, OrderDate);
+                -- Supports: WHERE CustomerID = ?
+                -- Supports: WHERE CustomerID = ? AND OrderDate = ?
+                -- Does NOT support: WHERE OrderDate = ?
+
+        3. Avoid over-indexing:
+            - Every index slows INSERT, UPDATE, DELETE operations
+            - More indexes = higher storage and maintenance cost
+            - Typical target: 3–5 non-clustered indexes per table
+
+        4. Remove unused indexes:
+            - Unused indexes waste space and slow writes
+
+    Notes:
+        - Data inside Index Pages is sorted by the non-clustered index key.
+        - Data inside Data Pages is NOT sorted by the non-clustered index.
+        - At the leaf level, non-clustered indexes store INDEX PAGES, not actual table data.
+        - Non-clustered indexes on a table with clustered index store the clustered key as the value.
+
+        **Why does a non-clustered index store the clustered key instead of the physical row location (RID)?**
+            Because physical row locations are not stable.
+            In clustered tables, rows can move due to page splits, updates, or index maintenance.
+            Storing RIDs would require updating all non-clustered indexes on every row move, which is expensive and inefficient.
+*/
+
+-- * Difference Between Clustered Index and Non-Clustered Index
+/* 
+   [1] Clustered Index
+        Definition:
+        - Physically sorts and stores table rows on disk
+
+        Number of Indexes:
+        - One clustered index per table only
+
+        Read Performance:
+        - Faster (data is already sorted)
+
+        Write Performance:
+        - Slower
+        - Reason: inserting/updating may require data row reordering
+
+        Storage Efficiency:
+        - More storage-efficient
+        - Data itself is the index
+
+        Use Cases:
+        - Unique column (e.g. Primary Key)
+        - Column not frequently modified
+        - Improves range queries (BETWEEN, >, <)
+
+    [2] Non-Clustered Index
+        Definition:
+        - Separate structure that stores index keys
+        - Contains pointers to the actual data rows
+
+        Number of Indexes:
+        - Multiple non-clustered indexes allowed per table
+
+        Read Performance:
+        - Slower than clustered (extra lookup needed)
+
+        Write Performance:
+        - Faster
+        - Physical data order is not affected
+
+        Storage Efficiency:
+        - Requires additional storage space
+        - Index + pointers to data
+
+        Use Cases:
+        - Columns frequently used in WHERE conditions
+        - JOIN columns
+        - Exact match queries (=)
+
+    Syntax
+        CREATE [CLUSTERED|NONCLUSTERED] INDEX IndexName
+        ON TableName (Column1 ASC|DESC, Column2 ASC|DESC, ...);
+
+    Notes:
+        - Default type: NONCLUSTERED if not specified.
+        - ASC | DESC:
+            Clustered: determines physical order of data rows in the table.
+            Non-clustered: determines order of entries in the index only, not the actual table rows.
+
+
+    Examples
+        1. Clustered index on CustomerID
+            CREATE CLUSTERED INDEX IX_Customers ON Customers(CustomerID);
+
+            - Table rows will be physically sorted by CustomerID
+            - Only one clustered index per table allowed
+
+        2. Non-clustered index on LastName + FirstName
+            CREATE NONCLUSTERED INDEX IX_Customers ON Customers(LastName, FirstName);
+
+            - Speeds up searches and sorts on LastName and FirstName
+            - Data rows remain in original table order
+
+        3. Non-clustered index with mixed sort order (ASC, DESC)
+            CREATE INDEX IX_Customers ON Customers(LastName ASC, FirstName DESC);
+
+            - Defaults to NONCLUSTERED
+            - Index pages will be sorted by LastName ascending and FirstName descending
+            - Useful for queries with ORDER BY LastName ASC, FirstName DESC
+*/
