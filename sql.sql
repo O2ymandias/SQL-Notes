@@ -2779,9 +2779,8 @@
             If data is archived and rarely queried.
 
     Notes:
+        - By default, SQL Server creates a CLUSTERED index on the primary key.
         - A table can have only ONE clustered index because data can be physically ordered only once.
-        - Leaf nodes contain the ACTUAL table data (all columns), unlike non-clustered indexes.
-        - All non-clustered indexes reference the clustered key (or RID if heap).
         - In most cases, an INT IDENTITY column is the best choice for a clustered index key.
 */
 
@@ -2955,17 +2954,57 @@
             - Prefer highly selective columns
 
         2. Index column order matters:
-            - Put the most selective (highest cardinality) column first
-            - SQL Server can SEEK on:
-                (first column) or (first + next columns)
-            - SQL Server CANNOT SEEK on:
-                non-leading columns alone
+            - Put the most selective column first.
+            - SQL Server can SEEK on: leading column(s) of the index
+            - SQL Server CANNOT SEEK on: non-leading columns alone
+            - If the order of predicates in query doesn't match the index:
+                SQL Server's optimizer reorders them automatically.
+                
+            - Rule: Filter on the LEFTMOST column(s) of the index
 
             Example:
                 CREATE INDEX IX_Orders ON Orders(CustomerID, OrderDate);
-                -- Supports: WHERE CustomerID = ?
-                -- Supports: WHERE CustomerID = ? AND OrderDate = ?
-                -- Does NOT support: WHERE OrderDate = ?
+
+                SELECT * FROM Orders WHERE CustomerID = 5 
+                    Good: Index SEEK (uses leading column).
+                
+                SELECT * FROM Orders WHERE CustomerID = 5 AND OrderDate = '2022-01-01' 
+                    Good: Index SEEK (uses both columns).
+                
+                SELECT * FROM Orders WHERE OrderDate = '2022-01-01' AND CustomerID = 5 
+                    Good: Index SEEK (SQL Server's optimizer reorders to: WHERE CustomerID = 5 AND OrderDate = '2022-01-01').
+                
+                SELECT * FROM Orders WHERE OrderDate = '2022-01-01' 
+                    Bad: Index/Clustered Index SCAN (skips leading column, reads all rows).
+
+            SEEK VS SCAN:
+                A) SEEK (Fast & Efficient):
+                    - Traverses the B-Tree to find specific rows.
+                    - Only reads the necessary pages.
+                    - If table has 1,000,000 rows and customer has 100 orders:
+                        Reads ~100 rows (0.01% of table)
+
+                    - B-Tree Navigation
+                    
+                                    [Root Node]
+                                /           \
+                            [Node]           [Node]
+                            /      \         /      \
+                        [Leaf]   [Leaf]  [Leaf]   [Leaf]
+                        ↑
+                    Reads 3-4 pages
+
+                B) SCAN (Slow & Inefficient):
+                    - Reads every row in the index or table sequentially.
+                    - If table has 1,000,000 rows and date matches 500:
+                        Still reads all 1,000,000 rows to find the 500
+
+                    - Sequential Read
+                    [Page 1] → [Page 2] → [Page 3] → ... → [Page 1000]
+                    ↓          ↓          ↓                  ↓
+                    Read      Read       Read              Read
+                    
+                    Reads ALL pages sequentially
 
         3. Avoid over-indexing:
             - Every index slows INSERT, UPDATE, DELETE operations
@@ -2987,65 +3026,62 @@
             Storing RIDs would require updating all non-clustered indexes on every row move, which is expensive and inefficient.
 */
 
--- * Difference Between Clustered Index and Non-Clustered Index
-/* 
-   [1] Clustered Index
-        Definition:
-        - Physically sorts and stores table rows on disk
+-- * More on Clustered Index and Non-Clustered Index
+/*
+    Caparison:
 
-        Number of Indexes:
-        - One clustered index per table only
+        [1] Clustered Index
+            Definition:
+                - Physically sorts and stores table rows on disk
 
-        Read Performance:
-        - Faster (data is already sorted)
+            Number of Indexes:
+                - One clustered index per table only
 
-        Write Performance:
-        - Slower
-        - Reason: inserting/updating may require data row reordering
+            Read Performance:
+                - Faster (data is already sorted)
 
-        Storage Efficiency:
-        - More storage-efficient
-        - Data itself is the index
+            Write Performance:
+                - Slower (inserting/updating may require data row reordering)
 
-        Use Cases:
-        - Unique column (e.g. Primary Key)
-        - Column not frequently modified
-        - Improves range queries (BETWEEN, >, <)
+            Storage Efficiency:
+                - More storage-efficient
+                - Data itself is the index
 
-    [2] Non-Clustered Index
-        Definition:
-        - Separate structure that stores index keys
-        - Contains pointers to the actual data rows
+            Use Cases:
+                - Unique column (Primary Key)
+                - Column not frequently modified
+                - Improves range queries (BETWEEN, >, <)
 
-        Number of Indexes:
-        - Multiple non-clustered indexes allowed per table
+        [2] Non-Clustered Index
+            Definition:
+                - Separate structure that stores index keys
+                - Contains pointers to the actual data rows
 
-        Read Performance:
-        - Slower than clustered (extra lookup needed)
+            Number of Indexes:
+                - Multiple non-clustered indexes allowed per table up to 999
 
-        Write Performance:
-        - Faster
-        - Physical data order is not affected
+            Read Performance:
+                - Slower than clustered (extra lookup needed) BUT way faster than heap structure.
 
-        Storage Efficiency:
-        - Requires additional storage space
-        - Index + pointers to data
+            Write Performance:
+                - Faster (Physical data order is not affected)
 
-        Use Cases:
-        - Columns frequently used in WHERE conditions
-        - JOIN columns
-        - Exact match queries (=)
+            Storage Efficiency:
+                - Requires additional storage space (Index + pointers to data)
+
+            Use Cases:
+                - Columns frequently used in WHERE/JOIN/ORDER BY.
+                - Exact match queries (=)
 
     Syntax
         CREATE [CLUSTERED|NONCLUSTERED] INDEX IndexName
         ON TableName (Column1 ASC|DESC, Column2 ASC|DESC, ...);
 
-    Notes:
-        - Default type: NONCLUSTERED if not specified.
-        - ASC | DESC:
-            Clustered: determines physical order of data rows in the table.
-            Non-clustered: determines order of entries in the index only, not the actual table rows.
-
+        Notes:
+            - Default type: NONCLUSTERED if not specified.
+            - ASC | DESC:
+                Clustered: determines physical order of data rows in the table.
+                Non-clustered: determines order of entries in the index only, not the actual table rows.
 
     Examples
         1. Clustered index on CustomerID
@@ -3066,4 +3102,1099 @@
             - Defaults to NONCLUSTERED
             - Index pages will be sorted by LastName ascending and FirstName descending
             - Useful for queries with ORDER BY LastName ASC, FirstName DESC
+
+    Drop Index
+        DROP INDEX IndexName ON TableName;
+*/
+
+-- * Indexes By Storage
+/*
+    [1] Row-Store Index
+        - Default storage type.
+        - Data is stored row by row.
+        - Each group of rows is stored on a separate Data Page.
+        - All columns of a single row are stored together.
+
+    [2] Column-Store Index
+        - Data is stored column by column.
+        - Each column values is stored independently in compressed segments.
+        - Data pages only stores the values of ONE column.
+
+    How SQL Servers builds the Column-Store Index
+
+        [A] Row Groups
+            - SQL Server divides the table data into Row Groups.
+            - Each Row Group contains up to nearly 1M rows.
+            - Example: Table with 2 million rows -> 2 Row Groups
+            This is a pre-step to optimize the performance (Parallel processing)
+
+        [B] Column Segment
+            - For each row group, SQL server will split the data by columns.
+
+        [C] Data Compression
+            - Each Column Segment is compressed independently.
+            - SQL Server creates Dictionaries to encode repeated values.
+            - Example:
+                Status column:
+                    "Active"
+                    "Inactive"
+                    "Active"
+                    "Inactive"
+
+                Dictionary:
+                    "Active"   -> 0
+                    "Inactive" -> 1
+
+                Stored Data Stream:
+                    0, 1, 0, 1
+
+        [D] Store (LOB Pages)
+            - Column-Store data is stored in special LOB (Large Object) Pages.
+            - LOB Page contains of:
+                1. Header
+                    Store Metadata like FileID, PageID
+
+                2. Segment Header
+                    Stores Metadata about the column segment that stored in that page like
+                        SegmentID,
+                        RowGroupID,
+                        ColumnID,
+                        EncodingType,
+                        DictionaryID ((if dictionary encoding is used))
+
+                3. Data Stream
+                    - Sequence of compressed values
+                    - Example: [0,1,1,0,1,0,1,1,1,...] 
+
+        [E] Defining whether it's clustered or non-clustered
+            [1] Clustered Column-Store Index
+                SQL Server won't build B-Tree instead it will use 'Column-Store Structure'
+
+            [2] Non-Clustered Column-Store Index
+                SQL Server will create additional structure besides the original structure (Heap/Clustered/Non-Clustered)
+
+    Comparison
+        [1] Row-Store Index
+            Definition:
+                - Organizes and stores data row by row.
+                - All columns of a row are stored together on the same data page.
+
+            Storage Efficiency:
+                - Less efficient in storage.
+                - Minimal compression compared to Column-Store.
+
+            Read / Write Optimization:
+                - Fair performance for both read and write operations.
+                - Optimized for frequent INSERT, UPDATE, DELETE.
+
+            I/O Efficiency:
+                - Lower I/O efficiency.
+                - Reads retrieve all columns of a row, even if not needed.
+
+            Best For:
+                - OLTP (Transactional systems): E-commerce, Banking systems, Financial systems, Order processing
+
+        [2] Column-Store Index
+            Definition:
+                - Organizes and stores data column by column.
+                - Each column is stored separately in compressed segments.
+
+            Storage Efficiency:
+                - Highly efficient due to heavy compression.
+                - Compression works best on repeated values per column.
+
+            Read / Write Optimization:
+                - Very fast read performance (especially scans & aggregations).
+                - Slow write performance (due to the heavy compression).
+
+            I/O Efficiency:
+                - Higher I/O efficiency.
+                - Reads only the required columns instead of entire rows.
+
+            Best For:
+                - OLAP (Analytical systems): Data Warehouses, Business Intelligence, Reporting, Analytics
+
+            Use Cases:
+                - Big data analytics.
+                - Scanning large datasets.
+                - Fast aggregations (SUM, COUNT, GROUP BY).
+
+
+    Syntax
+        CREATE [CLUSTERED|NONCLUSTERED] COLUMNSTORE INDEX IndexName
+        ON TableName (Column1, Column2, ...);
+
+        Notes:
+            - Defaults to ROWSTORE if not specified.
+
+        Examples
+            1. Clustered Row-Store Index on CustomerID
+                CREATE CLUSTERED INDEX IX_Customers ON Customers(CustomerID);
+
+            2. Non-clustered Row-Store Index on LastName + FirstName
+                CREATE NONCLUSTERED INDEX IX_Customers ON Customers(LastName, FirstName);
+
+            3. Clustered Column-Store Index on CustomerID
+                CREATE CLUSTERED COLUMNSTORE INDEX IX_Customers ON Customers; -- You can't specify columns in Clustered Column-Store Index
+
+            4. Non-clustered Column-Store Index on Country
+                CREATE NONCLUSTERED COLUMNSTORE INDEX IX_Customers ON Customers(country);
+
+    Notes:
+        - Only ONE Column-Store index per table allowed.
+        - Data Storage Efficiency (in order):
+            1. Clustered Column-Store (Compressed data)
+            2. Heap Structure (Actual data)
+            3. Clustered Row-Store (Actual data + B-Tree structure)
+*/
+
+
+-- * Indexes By Function (1. Unique Index)
+/*
+    Definition:
+        Ensures that no duplicate values exist in the indexed column or combination of columns.
+
+    Advantages:
+        - Enforces data integrity by preventing duplicates.
+        - Slightly improves query performance for lookups and joins.
+
+    Disadvantages:
+        - Writing to a Unique Index is slightly slower than a Non-Unique Index.
+
+    Syntax:
+        CREATE [UNIQUE] [CLUSTERED | NONCLUSTERED] [COLUMNSTORE] INDEX IndexName
+        ON TableName (Column1, Column2, ...);
+
+        Notes:
+            - Defaults to Non-Unique Index.
+
+    Common Use Cases:
+        - Email addresses in user tables.
+        - Username fields.
+        - Employee IDs or badge numbers.
+        - Social security numbers or national IDs.
+        - Any business key that must be unique.
+
+    NULL Handling:
+        - SQL Server (default): Allows only ONE NULL value in a unique index.
+
+            Example
+            CREATE TABLE Users (
+                UserID INT PRIMARY KEY,
+                Email NVARCHAR(100) NULL
+            );
+            
+            CREATE UNIQUE INDEX IX_Users_UniqueEmail
+            ON Users(Email);
+            
+            INSERT INTO Users(UserID, Email)
+            VALUES 
+                (1, 'abc@gmail.com'),
+                (2, NULL),
+                (3, NULL);
+
+            -- Error: Cannot insert duplicate key row in object 'dbo.Users' 
+            -- with unique index 'IX_Users_UniqueEmail'. The duplicate key value is (<NULL>).
+
+            Workaround (Using Filtered Index):
+                CREATE UNIQUE INDEX IX_Users_UniqueEmail 
+                ON Users(Email) 
+                WHERE Email IS NOT NULL;
+                    - This index ONLY includes rows where Email IS NOT NULL.
+                    - Rows with NULL Email are EXCLUDED from the index entirely.
+                    - Since NULL rows are not in the index, they are not checked for uniqueness.
+                    - You can have as many NULL values as you want because they're "invisible" to the index.
+
+                INSERT INTO Users(UserID, Email)
+                VALUES
+                    (1, 'abc@gmail.com'),
+                    (2, NULL),
+                    (3, NULL);
+                    -- Now it allows duplicate NULL values.
+
+    Composite Unique Indexes:
+        - When multiple columns are indexed, uniqueness applies to the COMBINATION of values.
+        - Example: (FirstName, LastName, BirthDate) allows duplicate first names, but not the same combination.
+
+    Examples:
+        -- Single column unique index
+        CREATE UNIQUE NONCLUSTERED INDEX IX_Users_Email
+        ON Users (Email);
+
+        -- Composite unique index (combination must be unique)
+        CREATE UNIQUE INDEX IX_Orders_CustomerProduct
+        ON Orders (CustomerID, ProductID);
+
+        -- Filtered unique index (allows duplicates outside the filter)
+        CREATE UNIQUE INDEX IX_Users_ActiveEmail
+        ON Users (Email)
+        WHERE IsActive = 1;
+
+    Notes:
+        - Duplicates values in a column will prevent creating a Unique Index on that column.
+        - Unique indexes are automatically created when you define PRIMARY KEY or UNIQUE constraints.
+        - You can have multiple unique indexes on the same table.
+*/
+
+-- * Indexes By Function (2. Filtered Index)
+/*
+    Definition:
+        A Filtered Index is a NONCLUSTERED index that includes only a subset of rows from a table, based on a filter predicate (WHERE clause).
+        Also known as a partial or conditional index.
+
+    Advantages:
+        - Improved query performance for queries matching the filter condition.
+        - Smaller index size (fewer rows indexed) = less disk space.
+
+    Syntax:
+        CREATE [UNIQUE] [NONCLUSTERED] INDEX IndexName
+        ON TableName (Column1, Column2, ...) -- For Non-Clustered Index
+        WHERE FilterCondition; -- For Filtered Index
+
+        Rules:
+            - Filtered Indexes can ONLY be NONCLUSTERED.
+                A clustered index defines the physical order of the entire table,
+                while a filtered index applies only to a subset of rows.
+
+            - Filtered Indexes are NOT supported on Columnstore indexes.
+
+            - The filter predicate must be precise.
+                Examples:
+                    Allowed: WHERE Email IS NOT NULL
+                    Allowed: WHERE Status = 'Active'
+                    Not allowed: WHERE GETDATE() > someDate
+
+            - Queries must match the filter predicate exactly to benefit from the filtered index.
+*/
+
+-- * Covering Index
+/*
+    Definition:
+        A covering index is a non-clustered index that contains ALL required columns needed for a query.
+        Since all data is in the index, SQL Server doesn't need to Key Lookup/ Bookmark Lookup.
+
+    Syntax:
+        CREATE NONCLUSTERED INDEX IndexName
+        ON TableName (Column1, Column2, ...)
+        INCLUDE (Column3, Column4, ...);
+
+    Non-Clustered Index WITHOUT Covering (Requires Key Lookup)
+        Table: Orders (Clustered Index on OrderID)
+        Non-Clustered Index: IX_Status on (Status)
+
+        Query:
+            SELECT 
+                OrderID,
+                CustomerName,
+                TotalAmount,
+                Status
+            FROM Orders 
+            WHERE Status = 'Pending'
+
+        Non-Clustered Index Structure (IX_Status):
+        ┌─────────────────────────────────────────┐
+        │         B-Tree (Index Pages)            │
+        │              Root Node                  │
+        │        /              \                 │
+        │   Branch Node      Branch Node          │
+        │    /      \          /      \           │
+        └─────────────────────────────────────────┘
+                        ↓
+        ┌─────────────────────────────────────────┐
+        │          Leaf Level Pages               │  <- Non-Clustered Index Leaf
+        ├─────────────────────────────────────────┤
+        │ Status      | Clustered Key (OrderID)   │
+        ├─────────────────────────────────────────┤
+        │ 'Pending'   | 12345                     │  <- Found via Index Seek
+        │ 'Pending'   | 12346                     │
+        │ 'Pending'   | 12347                     │
+        │ 'Shipped'   | 12348                     │
+        │ 'Shipped'   | 12349                     │
+        └─────────────────────────────────────────┘
+                        ↓
+                MISSING: CustomerName, TotalAmount
+                Need to perform KEY LOOKUP
+                        ↓
+
+        Clustered Index (Table Data):
+        ┌──────────────────────────────────────────────────────────┐
+        │ OrderID | CustomerName  | TotalAmount | Status | ...     │
+        ├──────────────────────────────────────────────────────────┤
+        │ 12345   | John Smith    | 150.00      | Pending| ...     │ <- Key Lookup finds this
+        │ 12346   | Jane Doe      | 200.00      | Pending| ...     │
+        │ 12347   | Bob Johnson   | 75.50       | Pending| ...     │
+        └──────────────────────────────────────────────────────────┘
+
+        Execution Steps:
+            Step 1: Index Seek on IX_Status finds Status='Pending' -> OrderID=12345
+            Step 2: Key Lookup -> Jump to clustered index using OrderID=12345
+            Step 3: Retrieve CustomerName, TotalAmount from clustered index
+            Step 4: Repeat for each matching row (12346, 12347...)
+        
+        Problem:
+            Multiple jumps between non-clustered index and clustered index
+            Expensive random I/O operations
+
+
+    Covering Index (NO Lookup Needed)
+        Table: Orders (Clustered Index on OrderID)
+        Covering Index: IX_Orders_Status_Covering on (Status) INCLUDE (OrderID, CustomerName, TotalAmount)
+
+        Query:
+            SELECT 
+                OrderID, 
+                CustomerName, 
+                TotalAmount, 
+                Status
+            FROM Orders 
+            WHERE Status = 'Pending'
+
+        Covering Index Structure (IX_Orders_Status_Covering):
+        ┌─────────────────────────────────────────────────────────────────┐
+        │              B-Tree (Index Pages)                               │
+        │                   Root Node                                     │
+        │             /                   \                               │
+        │      Branch Node            Branch Node                         │
+        │       /        \              /        \                        │
+        └─────────────────────────────────────────────────────────────────┘
+                                ↓
+        ┌─────────────────────────────────────────────────────────────────┐
+        │                   Leaf Level Pages                              │  <- Covering Index Leaf
+        ├─────────────────────────────────────────────────────────────────┤
+        │ Status    | OrderID | CustomerName | TotalAmount | Clustered Key│
+        ├─────────────────────────────────────────────────────────────────┤
+        │ 'Pending' | 12345   | John Smith   | 150.00      | 12345        │  <- ALL DATA HERE!
+        │ 'Pending' | 12346   | Jane Doe     | 200.00      | 12346        │
+        │ 'Pending' | 12347   | Bob Johnson  | 75.50       | 12347        │
+        │ 'Shipped' | 12348   | Alice Brown  | 300.00      | 12348        │
+        │ 'Shipped' | 12349   | Charlie Lee  | 125.00      | 12349        │
+        └─────────────────────────────────────────────────────────────────┘
+                                ↑
+                    ALL REQUIRED COLUMNS PRESENT
+                    NO NEED TO ACCESS CLUSTERED INDEX
+
+        Execution Steps:
+            Step 1: Index Seek on IX_Orders_Status_Covering finds -> Status='Pending'
+            Step 2: Read OrderID, CustomerName, TotalAmount directly from index leaf
+            Step 3: No key lookup needed
+        
+        Benefits: 
+            No need to jump to clustered index
+            Less expensive random I/O operations
+*/
+
+-- * When To Use Different Index Types
+/*
+    Is this a Primary Key?
+        YES -> Clustered Index
+        NO  -> Continue
+    
+    Is this for analytics/data warehouse?
+        YES -> Columnstore Index
+        NO  -> Continue
+    
+    Is this a staging/temporary table with mostly inserts?
+        YES -> HEAP (no index)
+        NO  -> Continue
+    
+    Do you need to enforce uniqueness?
+        YES -> Unique Index
+        NO  -> Continue
+    
+    Do you only need to index a subset of rows?
+        YES -> Filtered Index
+        NO  -> Continue
+    
+    Is this for JOINs, WHERE, or ORDER BY?
+        YES -> Non-Clustered Index
+        NO  -> Probably don't need an index
+*/
+
+-- * Index Management
+/*
+    [1] Monitor Index Usage
+        List all indexes in the current database
+            - Uses sys.indexes
+            - Database-scoped
+            Example:
+                SELECT
+                    object_id,
+                    name,
+                    type_desc,
+                    is_unique,
+                    is_disabled
+                FROM sys.indexes;
+
+
+        List all tables in the current database
+            - Uses sys.tables
+            - Database-scoped
+            Example:
+                SELECT
+                    object_id,
+                    name
+                FROM sys.tables;
+
+
+        Combine sys.indexes and sys.tables
+            - Shows which indexes belong to which tables
+            Example:
+                SELECT
+                    Ix.object_id,
+                    T.name AS TableName,
+                    Ix.index_id AS IndexId,
+                    Ix.name AS IndexName,
+                    Ix.type_desc AS IndexType,
+                    Ix.is_unique AS IsUniqueIndex,
+                    Ix.is_disabled AS IsDisabledIndex
+                FROM sys.indexes AS Ix
+                JOIN sys.tables AS T
+                    ON Ix.object_id = T.object_id
+                ORDER BY 
+                    T.name,
+                    Ix.name;
+
+            Notes:
+                - object_id identifies the table
+                - index_id identifies the index within that table
+                - (object_id + index_id) uniquely identifies an index
+
+
+        Dynamic Management Views (DMVs)
+            - Provide runtime performance and usage data
+            - Data is reset when SQL Server restarts
+
+
+        Index usage statistics
+            - Uses sys.dm_db_index_usage_stats
+            - Server-scoped DMV (stores stats per database)
+            - One row per index per database
+            - Tracks seeks, scans, lookups, and updates
+            Example:
+                SELECT *
+                FROM sys.dm_db_index_usage_stats
+                WHERE database_id = DB_ID();
+
+
+        Combine index metadata with usage statistics
+            Example:
+                SELECT
+                    Ix.object_id,
+                    T.name AS TableName,
+                    Ix.index_id AS IndexId,
+                    Ix.name AS IndexName,
+                    Ix.type_desc AS IndexType,
+                    Ix.is_unique AS IsUniqueIndex,
+                    Ix.is_disabled AS IsDisabledIndex,
+                    ISNULL(S.user_seeks, 0)   AS UserSeeks,
+                    ISNULL(S.user_scans, 0)   AS UserScans,
+                    ISNULL(S.user_lookups, 0) AS UserLookups,
+                    S.last_user_seek AS LastUserSeek,
+                    S.last_user_scan AS LastUserScan
+                FROM sys.indexes AS Ix
+                JOIN sys.tables AS T
+                    ON Ix.object_id = T.object_id
+                LEFT JOIN sys.dm_db_index_usage_stats AS S
+                    ON Ix.object_id = S.object_id
+                    AND Ix.index_id  = S.index_id
+                    AND S.database_id = DB_ID()
+                ORDER BY 
+                    T.name,
+                    Ix.name;
+
+            Notes:
+                - LEFT JOIN is required (unused indexes have no DMV row)
+                - database_id filter prevents cross-database confusion
+                - NULL stats = no usage since last SQL Server restart
+
+
+    [2] Monitor Missing Indexes
+
+        Purpose:
+            - Shows index recommendations based on query optimizer feedback
+            - Based on queries that ran but could not find a suitable index
+            - Recommendations reset on SQL Server restart
+
+        Missing index details
+            - Uses sys.dm_db_missing_index_details
+            Example:
+                SELECT *
+                FROM sys.dm_db_missing_index_details
+                WHERE database_id = DB_ID();
+
+        Notes:
+            - These are suggestions, NOT commands
+            - Can recommend overlapping or unnecessary indexes
+            - Always review before creating new indexes
+            - Missing index DMVs do NOT consider:
+                - Existing indexes
+                - Index maintenance cost
+                - Write overhead
+
+
+    [3] Monitor Duplicate / Redundant Indexes
+
+        Definition:
+            - Duplicate indexes have the same key columns
+            - Same order
+            - Same filter (if filtered)
+            - INCLUDE columns may differ (making them only partially redundant)
+
+        Example
+            SELECT
+                T.name AS TableName,
+                Ix.name AS IndexName,
+                Ix.type_desc AS IndexType,
+                Ic.key_ordinal,
+                Col.name AS ColumnName
+            FROM sys.indexes AS Ix
+            JOIN sys.tables AS T
+                ON Ix.object_id = T.object_id
+            JOIN sys.index_columns AS Ic
+                ON Ix.object_id = Ic.object_id
+                AND Ix.index_id  = Ic.index_id
+            JOIN sys.columns AS Col
+                ON Ic.object_id = Col.object_id
+                AND Ic.column_id = Col.column_id
+            WHERE Ic.key_ordinal > 0
+            ORDER BY
+                T.name,
+                Ix.name,
+                Ic.key_ordinal;
+
+        Notes:
+            - Indexes with identical key columns in the same order are candidates for removal
+            - Always check INCLUDE columns and query usage before dropping
+
+
+    [4] Update Statistics
+
+        Why statistics matter:
+            - Query optimizer relies on statistics for cardinality estimation
+            - Outdated statistics lead to:
+                - Poor execution plans
+                - Index scans instead of seeks
+                - Bad join strategies
+
+        What are statistics?
+            - Metadata describing data distribution
+            - Include:
+                - Histogram
+                - Density vector
+                - Row counts
+            - Automatically created for indexes
+            - Can be manually created on columns
+
+
+        View statistics details and modification counter
+            - Uses sys.dm_db_stats_properties
+            Example:
+                SELECT
+                    SCHEMA_NAME(t.schema_id) AS SchemaName,
+                    t.name AS TableName,
+                    s.name AS StatisticName,
+                    sp.last_updated AS LastUpdate,
+                    DATEDIFF(day, sp.last_updated, GETDATE()) AS DaysSinceLastUpdate,
+                    sp.rows AS Rows,
+                    sp.modification_counter AS ModificationsSinceLastUpdate
+                FROM sys.stats AS s
+                JOIN sys.tables AS t
+                    ON s.object_id = t.object_id
+                CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) AS sp
+                ORDER BY
+                    sp.modification_counter DESC;
+
+        Notes:
+            - modification_counter = number of data changes since last update
+            - High modification_counter relative to row count = stale statistics
+
+
+        Update statistics manually
+            Example:
+                UPDATE STATISTICS TableName;
+
+                -- Update a specific statistic
+                UPDATE STATISTICS TableName StatisticName;
+
+
+        Update all statistics in the current database
+            - Uses sp_updatestats
+            - Updates only statistics deemed outdated
+            Example:
+                EXEC sp_updatestats;
+
+        Best Practices:
+            1. Schedule weekly statistics updates
+            2. Update stats after large data loads or migrations
+
+
+    [5] Monitor Fragmentation
+
+        Fragmentation types:
+            - Internal fragmentation: Unused space within data pages
+            - Logical fragmentation: Pages out of logical order in the index
+
+
+        Fragmentation maintenance methods:
+
+            1. REORGANIZE
+                - Defragments leaf level only
+                - Online operation
+                - Lightweight
+                - Best for moderate fragmentation
+
+            2. REBUILD
+                - Recreates the entire index
+                - Fixes both logical and internal fragmentation
+                - Resource-intensive
+                - Can be offline (unless ONLINE = ON is supported)
+
+
+        Fragmentation statistics
+            - Uses sys.dm_db_index_physical_stats
+            Example:
+                SELECT
+                    T.name AS TableName,
+                    Ix.name AS IndexName,
+                    S.avg_fragmentation_in_percent AS AvgFragmentation,
+                    S.page_count AS PageCount
+                FROM sys.dm_db_index_physical_stats
+                    (DB_ID(), NULL, NULL, NULL, 'LIMITED') AS S
+                JOIN sys.indexes AS Ix
+                    ON S.object_id = Ix.object_id
+                    AND S.index_id  = Ix.index_id
+                JOIN sys.tables AS T
+                    ON S.object_id = T.object_id
+                WHERE
+                    Ix.name IS NOT NULL      -- Exclude heaps
+                    AND S.page_count > 1000  -- Ignore small indexes
+                ORDER BY
+                    S.avg_fragmentation_in_percent DESC;
+
+
+        When to defragment?
+            - avg_fragmentation_in_percent < 10%     -> No action
+            - avg_fragmentation_in_percent 10%–30%  -> REORGANIZE
+            - avg_fragmentation_in_percent > 30%    -> REBUILD
+*/
+
+
+-- * Execution Plan
+/*
+    Definition:
+        - Roadmap generated by a database on how it will execute a query step by step.
+        - Shows operations, order of execution, and estimated costs.
+
+    Estimated Execution Plan VS Actual Execution Plan VS Live Execution Plan
+        Estimated (Predicted)
+            - Generated without executing the query
+            - Based on statistics and indexes
+            
+        Actual (Executed)
+            - Generated after query execution
+            - Shows real row counts and execution times
+            
+        Live (During Execution)
+            - Real-time view while query is running
+            - Shows progress and current operations
+            - Useful for long-running queries
+
+        If predictions don't match the Actual Execution Plan, this indicates issues like:
+            - Inaccurate or outdated statistics
+            - Outdated indexes
+            Leading to poor performance.
+
+    Different Types Of Scans / Seeks in SQL Server
+
+        SQL Server uses two main access methods:
+            1. SCAN  -> Reads entire table/index (all rows)
+            2. SEEK  -> Navigates directly to specific rows (selective)
+
+        [1] Table Scan
+            - Reads the entire table page by page and row by row
+            - Occurs only on HEAPS (tables without a clustered index)
+            - No index is used
+            - Slowest option for large tables
+            - Example:
+                SELECT *
+                FROM Orders 
+                WHERE Status = 'Pending'
+                -- Orders is a heap (no clustered index)
+
+        [2] Index Scan 
+            - All types read the entire index pages
+            - Types:
+                A) Clustered Index Scan
+                B) Non-Clustered Index Scan
+                C) Clustered ColumnStore Index Scan
+                D) Non-Clustered ColumnStore Index Scan
+
+        [3] Index Seek
+            - Uses B-Tree structure to navigate directly to matching rows
+            - Reads only the required index pages
+            - Best for selective queries (WHERE/JOIN on indexed column)
+            - Types:
+                A) Clustered Index Seek
+                    - All columns are available (no lookup needed)
+                    - Most efficient for lookups on clustered key
+                    - Example:
+                        SELECT * 
+                        FROM Orders 
+                        WHERE OrderID = 12345
+                        -- OrderID is clustered index key
+                        -- Result: Clustered Index Seek ONLY.
+            
+                B) Non-Clustered Index Seek
+                    - Reads only required index pages
+                    - May require additional operations:
+
+                        Case 1: With Key Lookup (Clustered table)
+                            - Non-clustered index leaf nodes (index pages) contains key-value pairs [index key] -> [clustered key]
+                            - Must jump to clustered index to fetch missing columns
+                            - Example:
+                                -- Clustered Index: OrderID
+                                -- Non-Clustered Index: Status
+                                
+                                SELECT 
+                                    OrderID, 
+                                    CustomerName, 
+                                    TotalAmount, 
+                                    Status
+                                FROM Orders 
+                                WHERE Status = 'Pending'
+                                
+                                -- Execution:
+                                -- Step 1: Index Seek on Status -> finds OrderID=12345
+                                -- Step 2: Key Lookup -> uses OrderID to get missing columns
+                                -- Result: Non-Clustered Index Seek + Key Lookup
+                    
+                        Case 2: With RID Lookup (Heap table)
+                            - Non-clustered index leaf nodes (index pages) contains key-value pairs [index key] -> [RID]
+                            - Uses physical address (File:Page:Slot) to fetch missing columns
+                            - Example:
+                                -- No Clustered Index (Heap)
+                                -- Non-Clustered Index: Status
+                                
+                                SELECT 
+                                    OrderID, 
+                                    CustomerName, 
+                                    TotalAmount, 
+                                    Status
+                                FROM OrdersHeap 
+                                WHERE Status = 'Pending'
+                                
+                                -- Execution:
+                                -- Step 1: Index Seek on Status -> finds RID=1:2567:3
+                                -- Step 2: RID Lookup -> jumps to physical location
+                                -- Result: Non-Clustered Index Seek + RID Lookup
+                    
+                        Case 3: Covering Index (No Lookup)
+                            - All required columns included in index
+                            - No additional lookups needed
+                            - Example:
+                                CREATE INDEX IX_Orders_Status_Covering 
+                                ON Orders(Status) 
+                                INCLUDE (OrderID, CustomerName, TotalAmount);
+                                
+                                SELECT 
+                                    OrderID, 
+                                    CustomerName, 
+                                    TotalAmount, 
+                                    Status
+                                FROM Orders 
+                                WHERE Status = 'Pending'
+                                
+                                -- Execution:
+                                -- Step 1: Index Seek on Status
+                                -- Step 2: No lookup - all columns in index
+                                -- Result: Non-Clustered Index Seek ONLY.
+
+    Different Types Of Join Algorithms In Execution Plans
+        [1] Nested Loops
+            - Compares two tables row by row
+            - Best for small tables
+
+        [2] Hash Match
+            - Matches rows based on hash values
+            - Best for large tables
+
+        [3] Merge Join
+            - Merges two sorted tables
+            - Efficient when both tables are sorted
+
+    SQL Hints
+        Special commands that can be added to a query to force SQL Server
+        to execute it in a specific way for better performance.
+
+        - Hints override the Query Optimizer’s decisions.
+        - Use them carefully and only when you fully understand the impact.
+
+        Example (Force Hash Join):
+            SELECT *
+            FROM Orders AS o
+            LEFT JOIN Customers AS c
+                ON o.CustomerID = c.CustomerID
+            OPTION (HASH JOIN); -- Forces a Hash Join.
+
+        Example (Force Merge Join):
+            SELECT *
+            FROM Orders AS o
+            LEFT JOIN Customers AS c
+                ON o.CustomerID = c.CustomerID
+            OPTION (MERGE JOIN); -- Forces a Merge Join.
+
+        Example (Force Nested Loops Join):
+            SELECT *
+            FROM Orders AS o
+            LEFT JOIN Customers AS c
+                ON o.CustomerID = c.CustomerID
+            OPTION (LOOP JOIN); -- Forces a Nested Loops Join.
+
+        Example (Force Index Seek):
+            SELECT *
+            FROM Orders WITH (FORCESEEK) AS o
+            LEFT JOIN Customers AS c
+                ON o.CustomerID = c.CustomerID;
+
+        Example (Use a Specific Index):
+            SELECT *
+            FROM Orders WITH (INDEX(IX_Orders_Status)) AS o
+            WHERE o.Status = 'Pending';
+
+        Tips:
+            - Always test hints in all environments (Dev, Test, Staging, Production).
+            - SQL hints are quick fixes (workarounds).
+            - You should still identify the root cause and fix it properly (missing indexes, bad statistics, poor query design).
+*/
+
+-- * Indexing Strategy
+/*
+    The Golden Rule:
+        Avoid Over-Indexing
+
+        Reasons:
+            - Indexes slow down write operations (INSERT, UPDATE, DELETE) because SQL Server must maintain each index.
+            - Too many indexes can confuse the Query Optimizer:
+                - Increased compilation (planning) time
+                - Larger and more complex execution plans
+
+    [1] Initial Indexing Strategy
+        Decide based on workload type:
+
+        OLTP (Online Transaction Processing)
+            - Optimize WRITE performance
+            - Use Clustered Index on Primary Key
+            - Prefer narrow indexes
+            - Avoid excessive nonclustered indexes
+
+        OLAP (Online Analytical Processing)
+            - Optimize READ performance
+            - Use Columnstore Indexes
+            - Ideal for large, frequently queried tables
+            - Best for aggregations and reporting queries
+
+    [2] Usage-Pattern-Based Indexing
+        Index what is actually used, not what you assume.
+
+        Steps:
+            1. Identify frequently used Tables and Columns
+            2. Choose the right index type
+                - Clustered
+                - Nonclustered
+                - Filtered
+                - Covering
+            3. Test index impact on query performance
+
+    [3] Scenario-Based Indexing
+        Optimize indexes for real performance problems.
+
+        Steps:
+            1. Identify slow queries
+            2. Analyze the Execution Plan
+            3. Choose the right index
+            4. Test and compare execution plans (before vs after index creation)
+
+    [4] Monitoring & Maintenance
+        Indexing is not a one-time task.
+
+        Tasks:
+            1. Monitor index usage
+            2. Monitor missing indexes
+            3. Detect duplicate or redundant indexes
+            4. Update statistics regularly
+            5. Monitor and fix index fragmentation
+*/
+
+-- * SQL Partitioning
+/*
+    Definition:
+        Dividing big table into smaller partitions while still being treated as a single table.
+        Instead of having a big index on a large table, each partition can have its own smaller index reducing index size.
+
+    Creating Partitions
+        [1] Create Partition Function
+            Define the logic on how to divide data into partitions based on Partition Key (Date, Region).
+
+            Syntax:
+                CREATE PARTITION FUNCTION PartitionFunctionName (DataType)
+                AS RANGE {LEFT | RIGHT} FOR VALUES (Value1, Value2, ...);
+
+            Example:
+                CREATE PARTITION FUNCTION PF_OrdersByDate (DATE)
+                AS RANGE LEFT FOR VALUES ('2023-12-31', '2024-12-31', '2025-12-31');
+
+            NOTE:
+                - 3 Boundaries ('2023-12-31', '2024-12-31', '2025-12-31') create 4 partitions:
+                    Partition 1: <= '2023-12-31'
+                    Partition 2: '2024-01-01' to '2024-12-31'
+                    Partition 3: '2025-01-01' to '2025-12-31'
+                    Partition 4: > '2025-12-31'
+
+                - 4 partitions need 4 File Groups.
+
+            Query List All Existing Partition Functions:
+                - Uses sys.partition_functions
+                - Example:
+                    SELECT *
+                    FROM sys.partition_functions;
+
+        [2] Create File Groups
+            File Group is a logical container of one or more data files to help organize partitions.
+            For each partition we create a separate file group.
+
+            Syntax:
+                ALTER DATABASE DatabaseName
+                ADD FILEGROUP FileGroupName;
+
+            Example:
+                ALTER DATABASE SalesDB
+                ADD FILEGROUP FG_2023;
+
+            Remove File Group:
+                ALTER DATABASE DatabaseName
+                REMOVE FILEGROUP FileGroupName;
+
+            Query List All Existing File Groups:
+                - Uses sys.filegroups
+                - Example:
+                    SELECT *
+                    FROM sys.filegroups;
+
+            Primary File Group:
+                - Default file group where all database objects are stored
+
+        [3] Create Data Files
+            Data Files are physical files where data is stored.
+            Two types: Primary Data File (.mdf) and Secondary Data File (.ndf).
+            For Partitioning, we create Secondary Data Files.
+
+            Syntax:
+                ALTER DATABASE DatabaseName
+                ADD FILE
+                (
+                    NAME = LogicalFileName,
+                    FILENAME = 'PhysicalFilePath',
+                )
+                TO FILEGROUP FileGroupName;
+
+            Example:
+                ALTER DATABASE SalesDB
+                ADD FILE
+                (
+                    NAME = 'P_2023',
+                    FILENAME = 'C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA\P_2023.ndf',
+                )
+                TO FILEGROUP FG_2023;
+
+            Query List All Existing Data Files:
+                - Join sys.filegroups with sys.master_files
+                - Example:
+                    SELECT
+                        fg.name AS FileGroupName,
+                        mf.name AS LogicalFileName,
+                        mf.physical_name AS PhysicalFilePath,
+                        mf.size/128 AS SizeInMB
+                    FROM sys.filegroups fg
+                    JOIN sys.master_files mf
+                        ON fg.data_space_id = mf.data_space_id
+                    WHERE mf.database_id = DB_ID('SalesDB');
+
+        [4] Create Partition Scheme
+            Map partitions to file groups.
+
+            Syntax:
+                CREATE PARTITION SCHEME PartitionSchemeName
+                AS PARTITION PartitionFunctionName
+                TO (FileGroup1, FileGroup2, ...);
+                NOTE: Sort filegroups according to the results of the function's partitions.
+
+
+            Example:
+                CREATE PARTITION SCHEME PS_OrdersByDate
+                AS PARTITION PF_OrdersByDate
+                TO (FG_2022, FG_2023, FG_2024, FG_2025);
+
+            Query List All Existing Partition Schemes:
+                SELECT
+                    ps.name AS PartitionSchemeName,
+                    pf.name AS PartitionFunctionName,
+                    dds.destination_id AS PartitionNumber,
+                    fg.name AS FileGroupName
+                FROM sys.partition_schemes ps
+                JOIN sys.partition_functions pf
+                    ON pf.function_id = ps.function_id
+                JOIN sys.destination_data_spaces dds
+                    ON ps.data_space_id = dds.partition_scheme_id
+                JOIN sys.filegroups fg
+                    ON dds.data_space_id = fg.data_space_id
+
+        [5] Create Partitioned Table
+            Create table using the partition scheme.
+
+            Syntax:
+                CREATE TABLE TableName
+                (
+                    Column1 DataType,
+                    Column2 DataType,
+                    ...
+                )
+                ON PartitionSchemeName (PartitionKeyColumn);
+
+            Example:
+                CREATE TABLE Sales.Orders_Partitioned
+                (
+                    OrderID INT,
+                    OrderDate DATE,
+                    Sales INT
+                )
+                ON PS_OrdersByDate (OrderDate);
+
+            Notes:
+                - Data will be distributed across partitions based on OrderDate.
+                - Each partition will reside in its respective file group as defined in the partition scheme.
+
+        [6] Insert Data into Partitioned Table
+            Insert data as usual; SQL Server will automatically place rows into the correct partition.
+
+            Example:
+                INSERT INTO Sales.Orders_Partitioned (OrderID, OrderDate, Sales)
+                VALUES (1, '2023-05-15', 100)
+
+            Query Number of Rows per Partition:
+                SELECT
+                    dds.destination_id AS PartitionNumber,
+                    fg.name AS FileGroupName,
+                    p.rows AS NumberOfRows
+                FROM sys.partitions p
+                JOIN sys.destination_data_spaces dds
+                    ON p.partition_number = dds.destination_id
+                JOIN sys.filegroups fg
+                    ON dds.data_space_id = fg.data_space_id
+                WHERE p.object_id = OBJECT_ID('Sales.Orders_Partitioned')
+
+
+        Summary:
+            Partition Function -> Decides how to split data into multiple partitions.
+            Partition Scheme   -> Maps those partitions to specific file groups.
+            File Groups       -> Folders to organize data files. Each file group can hold one or more data files.
 */
